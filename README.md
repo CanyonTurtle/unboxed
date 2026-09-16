@@ -70,8 +70,9 @@ toward it slides you down slowly instead of falling -- press **X** again to wall
 and away, with a fresh double-jump still available afterward. Walk into a pot to break it -- it may
 reveal a coin (score) or a heart (heals), with a little burst of particles. Three enemy kinds patrol
 -- walkers along the ground, creepers up and down a wall, flies back and forth through open air --
-jump on one from above (or catch it with a midair sword swing, **X** while airborne) to defeat it,
-or touch it from the side and it hits back.
+and the only way to defeat one is a midair swirl attack (**Z** while airborne), which hits every
+side at once; touching an enemy any other way, jumping on top included, just hits you back and
+briefly stuns you.
 
 Every room starts with its doors shut -- clearing every enemy in it (the first room has none, so
 it's already clear) reveals its powerup and opens a door on each side that isn't the one you came

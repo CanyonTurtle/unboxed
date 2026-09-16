@@ -18,17 +18,27 @@ const INVULN_FRAMES: u16 = 45;
 const DAMAGE_KNOCKBACK: f32 = 2.0;
 const SQUASH_FRAMES: u8 = 7;
 const SWING_FRAMES: u8 = 10;
+const HIT_STUN_FRAMES: u16 = 12;
 
 pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     const was_on_ground = self.on_ground;
-    const moving_left = input.held(gamepad, w4.BUTTON_LEFT);
-    const moving_right = input.held(gamepad, w4.BUTTON_RIGHT);
-    if (moving_left) {
-        self.vel_x -= MOVE_ACCEL;
-        self.facing_right = false;
-    } else if (moving_right) {
-        self.vel_x += MOVE_ACCEL;
-        self.facing_right = true;
+    // Stunned: knockback still bleeds off via friction, but no input is read
+    // at all -- movement, jumping, and swinging all wait for it to expire.
+    const stunned = self.hit_stun_timer > 0;
+    var moving_left = false;
+    var moving_right = false;
+    if (!stunned) {
+        moving_left = input.held(gamepad, w4.BUTTON_LEFT);
+        moving_right = input.held(gamepad, w4.BUTTON_RIGHT);
+        if (moving_left) {
+            self.vel_x -= MOVE_ACCEL;
+            self.facing_right = false;
+        } else if (moving_right) {
+            self.vel_x += MOVE_ACCEL;
+            self.facing_right = true;
+        } else {
+            self.vel_x *= FRICTION;
+        }
     } else {
         self.vel_x *= FRICTION;
     }
@@ -42,7 +52,7 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
 
     // Applied after gravity so a jump always snaps to exactly JUMP_VELOCITY
     // this frame, whether it's the ground jump, a wall jump, or a double-jump.
-    if (input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
+    if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
         if (self.on_ground) {
             self.vel_y = JUMP_VELOCITY;
         } else if (self.wall_side != 0) {
@@ -72,22 +82,24 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
 
     // Midair only -- a ground swing would be redundant with just walking
     // into an enemy, and this is meant to reward staying airborne.
-    if (!self.on_ground and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_2)) {
+    if (!stunned and !self.on_ground and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_2)) {
         self.swing_timer = SWING_FRAMES;
     }
     if (self.swing_timer > 0) self.swing_timer -= 1;
 
     if (self.invuln_timer > 0) self.invuln_timer -= 1;
+    if (self.hit_stun_timer > 0) self.hit_stun_timer -= 1;
 }
 
-// Applies contact damage, knocking the character back away from `from_x`.
-// A no-op while still invulnerable from a previous hit.
+// Applies contact damage and knockback, and starts hit stun. A no-op
+// while still invulnerable from a previous hit.
 pub fn takeDamage(self: *types.Character, amount: i32, from_x: f32) void {
     if (self.invuln_timer > 0) return;
     self.hp = @max(0, self.hp - amount);
     self.vel_x = if (self.x < from_x) -DAMAGE_KNOCKBACK else DAMAGE_KNOCKBACK;
     self.vel_y = -1.5;
     self.invuln_timer = INVULN_FRAMES;
+    self.hit_stun_timer = HIT_STUN_FRAMES;
 }
 
 const testing = std.testing;
@@ -112,12 +124,26 @@ test "update only allows a jump while on_ground" {
     try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
 }
 
-test "takeDamage reduces hp, applies knockback, and starts invulnerability" {
+test "takeDamage reduces hp, applies knockback, and starts invulnerability and hit stun" {
     var c = types.Character{ .x = 20, .hp = types.BASE_MAX_HP };
     takeDamage(&c, 1, 30); // hazard to the right -> knocked left
     try testing.expectEqual(types.BASE_MAX_HP - 1, c.hp);
     try testing.expect(c.vel_x < 0);
     try testing.expect(c.invuln_timer > 0);
+    try testing.expect(c.hit_stun_timer > 0);
+}
+
+test "hit stun suppresses movement and jump input until it expires" {
+    room_types.active = .{};
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground; // a floor to stay grounded on
+    var c = types.Character{ .x = 32, .y = 50 - types.HEIGHT, .on_ground = true, .hit_stun_timer = 1 };
+    update(&c, w4.BUTTON_RIGHT | w4.BUTTON_1, 0); // still stunned this frame -> input ignored
+    try testing.expectEqual(@as(f32, 0), c.vel_x); // no acceleration, and friction already zeroed it
+    try testing.expect(c.vel_y != JUMP_VELOCITY);
+    try testing.expectEqual(@as(u16, 0), c.hit_stun_timer);
+
+    update(&c, w4.BUTTON_RIGHT | w4.BUTTON_1, 0); // stun has expired -> input works again
+    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
 }
 
 test "takeDamage is a no-op while invulnerable" {

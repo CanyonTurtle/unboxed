@@ -93,13 +93,12 @@ pub fn update(gamepad: u8) void {
     }
 
     for (&enemy_types.enemies) |*enemy| {
-        switch (enemy_sim.update(enemy, char_types.player.aabb(), char_types.player.vel_y)) {
+        switch (enemy_sim.update(enemy, char_types.player.aabb())) {
             .none => {},
-            .defeated => particle_sim.spawnBurst(enemy.x, enemy.y),
             .hit_player => |amount| char_sim.takeDamage(&char_types.player, amount, enemy.x),
         }
-        // A midair sword swing defeats on contact too -- checked separately,
-        // since the sword's hitbox is the character's, not the enemy's, to know about.
+        // The only way to defeat an enemy: the midair swirl attack, checked
+        // separately since its hitbox is the character's, not the enemy's, to know about.
         if (enemy.alive) {
             if (char_types.player.swingHitbox()) |sword| {
                 if (enemy.aabb().overlaps(sword)) {
@@ -218,7 +217,7 @@ test "defeating an enemy spawns particles" {
     clearField();
     particle_sim.clear();
     enemy_types.enemies[0] = .{ .x = 40, .y = 40, .alive = true };
-    char_types.player = .{ .x = 40, .y = 36, .vel_y = 2 }; // falling, mostly above -> a stomp
+    char_types.player = .{ .x = 40, .y = 40, .swing_timer = 5, .on_ground = false };
 
     update(0);
 

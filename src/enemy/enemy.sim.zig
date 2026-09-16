@@ -1,5 +1,5 @@
-// Per-kind movement (walker: ground, creeper: a wall, fly: open air with a
-// bob) plus one shared "battle" rule: stomp from above defeats, side contact hits back.
+// Per-kind movement (walker/creeper/fly) plus one shared rule: any contact
+// hits the player back -- only the player's sword swing (game.sim) defeats an enemy.
 
 const gravity = @import("../core/core.gravity.zig");
 const collision = @import("../core/core.collision.zig");
@@ -13,7 +13,7 @@ const FLY_BOB_AMPLITUDE: f32 = 6;
 const FLY_BOB_PERIOD: u16 = 90; // frames for one full bob cycle
 pub const CONTACT_DAMAGE: i32 = 1;
 
-pub const Event = union(enum) { none, hit_player: i32, defeated };
+pub const Event = union(enum) { none, hit_player: i32 };
 
 fn tileQuery() collision.TileQuery {
     return .{ .tile_size = room_types.TILE_SIZE, .isSolid = &room_types.isSolid };
@@ -46,7 +46,7 @@ fn updateFly(self: *types.Enemy) void {
     self.y = self.base_y + @sin(phase) * FLY_BOB_AMPLITUDE;
 }
 
-pub fn update(self: *types.Enemy, player_box: collision.Rect, player_vel_y: f32) Event {
+pub fn update(self: *types.Enemy, player_box: collision.Rect) Event {
     if (!self.alive) return .none;
 
     switch (self.kind) {
@@ -56,14 +56,6 @@ pub fn update(self: *types.Enemy, player_box: collision.Rect, player_vel_y: f32)
     }
 
     if (!self.aabb().overlaps(player_box)) return .none;
-
-    // Stomped: falling, and mostly above the enemy's own top edge -- a
-    // simple stand-in for real per-side contact resolution.
-    const stomped = player_vel_y > 0 and player_box.y < self.y;
-    if (stomped) {
-        self.alive = false;
-        return .defeated;
-    }
     return .{ .hit_player = CONTACT_DAMAGE };
 }
 
@@ -79,7 +71,7 @@ test "walker patrols horizontally and turns around at a wall" {
     var ever_turned = false;
     var i: u32 = 0;
     while (i < 150) : (i += 1) {
-        _ = update(&enemy, far_away, 0);
+        _ = update(&enemy, far_away);
         try testing.expect(enemy.x <= 12 * 5 - types.WIDTH);
         if (!enemy.facing_right) ever_turned = true;
     }
@@ -93,7 +85,7 @@ test "creeper patrols vertically between its range and never leaves it" {
     var reached_bottom = false;
     var i: u32 = 0;
     while (i < 200) : (i += 1) {
-        _ = update(&enemy, far_away, 0);
+        _ = update(&enemy, far_away);
         try testing.expect(enemy.y >= enemy.range_min - 1 and enemy.y <= enemy.range_max + 1);
         if (enemy.y >= 39) reached_bottom = true;
     }
@@ -108,7 +100,7 @@ test "fly patrols horizontally and bobs vertically around base_y" {
     var max_y: f32 = -1000;
     var i: u32 = 0;
     while (i < 200) : (i += 1) {
-        _ = update(&enemy, far_away, 0);
+        _ = update(&enemy, far_away);
         try testing.expect(enemy.x >= enemy.range_min - 1 and enemy.x <= enemy.range_max + 1);
         min_y = @min(min_y, enemy.y);
         max_y = @max(max_y, enemy.y);
@@ -119,24 +111,15 @@ test "fly patrols horizontally and bobs vertically around base_y" {
 test "update is a no-op for a dead enemy" {
     var enemy = types.Enemy{ .alive = false, .x = 10, .y = 10 };
     const player_box = collision.Rect{ .x = 10, .y = 10, .w = 8, .h = 8 };
-    try testing.expectEqual(Event.none, update(&enemy, player_box, 1));
+    try testing.expectEqual(Event.none, update(&enemy, player_box));
     try testing.expectEqual(@as(f32, 10), enemy.x);
 }
 
-test "stomping from above defeats the enemy, regardless of kind" {
+test "any contact hits the player back -- jumping on top no longer defeats an enemy" {
     room_types.active = .{};
     var enemy = types.Enemy{ .kind = .fly, .x = 20, .y = 20, .alive = true, .range_min = 20, .range_max = 20, .base_y = 20 };
     const player_above = collision.Rect{ .x = 20, .y = 14, .w = 8, .h = 8 };
-    const event = update(&enemy, player_above, 2);
-    try testing.expectEqual(Event.defeated, event);
-    try testing.expect(!enemy.alive);
-}
-
-test "side contact hits the player instead of defeating the enemy" {
-    room_types.active = .{};
-    var enemy = types.Enemy{ .kind = .creeper, .x = 20, .y = 20, .alive = true, .range_min = 20, .range_max = 20 };
-    const player_side = collision.Rect{ .x = 25, .y = 20, .w = 8, .h = 8 };
-    const event = update(&enemy, player_side, 0);
+    const event = update(&enemy, player_above);
     try testing.expectEqual(CONTACT_DAMAGE, event.hit_player);
     try testing.expect(enemy.alive);
 }

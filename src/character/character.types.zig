@@ -7,10 +7,9 @@ pub const WIDTH: f32 = 8;
 pub const HEIGHT: f32 = 11;
 pub const BASE_MAX_HP: i32 = 5;
 
-// The sword's reach while swinging -- a box extending out from whichever
-// side the character faces, well past their own silhouette.
-const SWING_REACH: f32 = 9;
-const SWING_HEIGHT: f32 = 7;
+// How far the midair swirl attack reaches on every side of the character --
+// it's an all-around spin, not a directional poke, so it isn't facing-dependent.
+const SWING_RADIUS: f32 = 8;
 
 pub const Character = struct {
     x: f32 = 0,
@@ -26,6 +25,9 @@ pub const Character = struct {
     // Brief flicker-and-ignore-damage window after a hit (character.sim.
     // takeDamage), so one contact can't drain the whole bar in one frame.
     invuln_timer: u16 = 0,
+    // Nonzero right after a hit -- suppresses input (character.sim.update)
+    // so knockback plays out before control returns.
+    hit_stun_timer: u16 = 0,
     score: u32 = 0,
     // Unlocked permanently by a double_jump powerup; air_jumps_used resets
     // to 0 the instant on_ground goes true (character.sim.update).
@@ -37,22 +39,24 @@ pub const Character = struct {
     // Nonzero for a few frames right after landing -- character.render
     // shows a squashed pose while it counts down (character.sim.update).
     squash_timer: u8 = 0,
-    // Nonzero while a midair sword swing is active -- see swingHitbox
-    // below; ordinary jump-on-top still works whether or not this is set.
+    // Nonzero while a midair swirl attack is active -- see swingHitbox
+    // below. It's the only way to defeat an enemy now; jumping on one just bounces off.
     swing_timer: u8 = 0,
 
     pub fn aabb(self: Character) collision.Rect {
         return .{ .x = self.x, .y = self.y, .w = WIDTH, .h = HEIGHT };
     }
 
-    // The sword's own hitbox this frame, or null while not swinging.
+    // The swirl's hitbox this frame, or null while not swinging -- a ring
+    // around the whole character, since a spin attack hits every side at once.
     pub fn swingHitbox(self: Character) ?collision.Rect {
         if (self.swing_timer == 0) return null;
-        const mid_y = self.y + HEIGHT / 2 - SWING_HEIGHT / 2;
-        return if (self.facing_right)
-            .{ .x = self.x + WIDTH, .y = mid_y, .w = SWING_REACH, .h = SWING_HEIGHT }
-        else
-            .{ .x = self.x - SWING_REACH, .y = mid_y, .w = SWING_REACH, .h = SWING_HEIGHT };
+        return .{
+            .x = self.x - SWING_RADIUS,
+            .y = self.y - SWING_RADIUS,
+            .w = WIDTH + SWING_RADIUS * 2,
+            .h = HEIGHT + SWING_RADIUS * 2,
+        };
     }
 };
 
@@ -65,12 +69,11 @@ test "swingHitbox is null while not swinging" {
     try testing.expect(c.swingHitbox() == null);
 }
 
-test "swingHitbox extends in front of the character, facing-dependent" {
-    const right_facing = Character{ .x = 10, .y = 10, .swing_timer = 3, .facing_right = true };
-    const right_box = right_facing.swingHitbox().?;
-    try testing.expectEqual(@as(f32, 10 + WIDTH), right_box.x);
-
-    const left_facing = Character{ .x = 10, .y = 10, .swing_timer = 3, .facing_right = false };
-    const left_box = left_facing.swingHitbox().?;
-    try testing.expectEqual(@as(f32, 10 - SWING_REACH), left_box.x);
+test "swingHitbox surrounds the character on every side, regardless of facing" {
+    const c = Character{ .x = 10, .y = 10, .swing_timer = 3, .facing_right = false };
+    const box = c.swingHitbox().?;
+    try testing.expectEqual(@as(f32, 10 - SWING_RADIUS), box.x);
+    try testing.expectEqual(@as(f32, 10 - SWING_RADIUS), box.y);
+    try testing.expectEqual(WIDTH + SWING_RADIUS * 2, box.w);
+    try testing.expectEqual(HEIGHT + SWING_RADIUS * 2, box.h);
 }
