@@ -137,6 +137,26 @@ async function loadCart(wasmPath) {
     mem8[addr] = byte;
   }
 
+  // WASM4's line() strokes with DRAW_COLORS color1 only (unlike rect's
+  // fill+border split). Plain Bresenham -- exact endpoints/slope, not
+  // subpixel-accurate, but enough to verify a line actually got drawn where expected.
+  function doLine(x1, y1, x2, y2) {
+    const dc = view.getUint16(DRAW_COLORS_ADDR, true);
+    const color1 = dc & 0xf;
+    if (color1 === 0) return;
+    let x = x1, y = y1;
+    const dx = Math.abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+    const dy = -Math.abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      setPixel(x, y, color1 - 1);
+      if (x === x2 && y === y2) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x += sx; }
+      if (e2 <= dx) { err += dx; y += sy; }
+    }
+  }
+
   // Fill/stroke semantics ported from WASM4's framebufferRect: DRAW_COLORS
   // color1 fills, color2 strokes a 1px border (0 in either nibble means
   // "don't draw that part"). hline/vline/oval all reuse this as a rough
@@ -245,7 +265,7 @@ async function loadCart(wasmPath) {
     memory,
     blit: (p, x, y, w, h, flags) => doBlit(p, x, y, w, h, 0, 0, w, flags),
     blitSub: (p, x, y, w, h, sx, sy, stride, flags) => doBlit(p, x, y, w, h, sx, sy, stride, flags),
-    line() {},
+    line: (x1, y1, x2, y2) => doLine(x1, y1, x2, y2),
     hline: (x, y, len) => doRect(x, y, len, 1),
     vline: (x, y, len) => doRect(x, y, 1, len),
     oval: (x, y, w, h) => doRect(x, y, w, h),
@@ -325,6 +345,8 @@ async function loadCart(wasmPath) {
     getPlayerY: () => e.debugGetPlayerY(),
     getRoomX: () => e.debugGetRoomX(),
     getRoomY: () => e.debugGetRoomY(),
+    getPlatformX: () => e.debugGetPlatformX(),
+    getPlatformY: () => e.debugGetPlatformY(),
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

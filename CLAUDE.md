@@ -41,7 +41,8 @@ if a file would blow the 500-line limit below, that's a sign the concept
 itself should split into two folders, not that one file should become two.
 
 Current concepts, as a reference: `character`, `pot`, `item`, `enemy`,
-`powerup` (a permanent player upgrade), `room` (one screen's tile grid +
+`powerup` (a permanent player upgrade), `platform` (a spring-physics
+swinging platform -- see below), `room` (one screen's tile grid +
 procedural generation), `map` (the room graph -- see below), and `game`
 (the orchestrator tying every other concept together -- see below).
 
@@ -82,6 +83,15 @@ cross-entity effects (a broken pot reveals an item; a collected coin
 increases score). No entity module ever imports another entity's
 `.types.zig` or `.sim.zig` directly -- if you find yourself wanting to,
 route the interaction through `game.sim.zig` and an `Event` instead.
+
+The same rule applies when one entity needs to *move* another, not just
+react to it: `platform.sim.update` takes the player as a plain `Rect` +
+`f32` (never `character.types.Character`) and returns a `RideResult`
+(riding?, new top height, horizontal drift) instead of writing to the
+player itself -- `game.sim.zig` is what actually assigns the result onto
+`character.types.player`. A result struct works the same way `Event` does;
+reach for whichever shape fits (a fired-once occurrence vs. an ongoing
+per-frame state) but keep the direction of control the same either way.
 
 ## The render contract
 

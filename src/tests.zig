@@ -15,6 +15,7 @@ test {
     _ = @import("item/item.sim.zig");
     _ = @import("enemy/enemy.sim.zig");
     _ = @import("powerup/powerup.sim.zig");
+    _ = @import("platform/platform.sim.zig");
 
     _ = @import("map/map.types.zig");
     _ = @import("map/map.sim.zig");

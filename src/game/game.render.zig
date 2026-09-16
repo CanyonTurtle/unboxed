@@ -15,6 +15,8 @@ const enemy_types = @import("../enemy/enemy.types.zig");
 const enemy_render = @import("../enemy/enemy.render.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
 const powerup_render = @import("../powerup/powerup.render.zig");
+const platform_types = @import("../platform/platform.types.zig");
+const platform_render = @import("../platform/platform.render.zig");
 const map_types = @import("../map/map.types.zig");
 const state = @import("game.types.zig");
 
@@ -24,6 +26,7 @@ pub fn draw() void {
     for (item_types.items) |item| item_render.draw(item);
     for (enemy_types.enemies) |enemy| enemy_render.draw(enemy);
     powerup_render.draw(powerup_types.active);
+    for (platform_types.platforms) |plat| platform_render.draw(plat);
     char_render.draw(char_types.player);
     drawHud();
     if (state.game.game_over) drawGameOver();

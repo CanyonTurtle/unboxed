@@ -14,6 +14,8 @@ const enemy_types = @import("../enemy/enemy.types.zig");
 const enemy_sim = @import("../enemy/enemy.sim.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
 const powerup_sim = @import("../powerup/powerup.sim.zig");
+const platform_types = @import("../platform/platform.types.zig");
+const platform_sim = @import("../platform/platform.sim.zig");
 const map_sim = @import("../map/map.sim.zig");
 const state = @import("game.types.zig");
 
@@ -61,6 +63,17 @@ pub fn update(gamepad: u8) void {
     }
 
     char_sim.update(&char_types.player, gamepad, state.game.prev_gamepad);
+
+    for (&platform_types.platforms) |*plat| {
+        const ride = platform_sim.update(plat, char_types.player.aabb(), char_types.player.vel_y);
+        if (ride.riding) {
+            char_types.player.y = ride.top_y - char_types.HEIGHT;
+            char_types.player.x += ride.delta_x;
+            char_types.player.vel_y = 0;
+            char_types.player.on_ground = true;
+        }
+    }
+
     map_sim.update(gamepad, &char_types.player);
 
     for (&pot_types.pots) |*pot| {
@@ -173,4 +186,19 @@ test "player hp reaching zero ends the run" {
     char_types.player.hp = 0;
     update(0);
     try testing.expect(state.game.game_over);
+}
+
+test "riding a swinging platform holds the player up instead of falling through" {
+    newRun();
+    clearField();
+    const plat = &platform_types.platforms[0];
+    platform_sim.spawn(plat, 40, 10, 40);
+    char_types.player = .{ .x = plat.body.x, .y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT };
+
+    var i: u32 = 0;
+    while (i < 20) : (i += 1) update(0);
+
+    try testing.expect(char_types.player.on_ground);
+    const expected_y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT;
+    try testing.expect(@abs(char_types.player.y - expected_y) < 3);
 }

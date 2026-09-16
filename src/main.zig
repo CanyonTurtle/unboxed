@@ -18,6 +18,8 @@ comptime {
         @export(&debug.getPlayerY, .{ .name = "debugGetPlayerY" });
         @export(&debug.getRoomX, .{ .name = "debugGetRoomX" });
         @export(&debug.getRoomY, .{ .name = "debugGetRoomY" });
+        @export(&debug.getPlatformX, .{ .name = "debugGetPlatformX" });
+        @export(&debug.getPlatformY, .{ .name = "debugGetPlatformY" });
     }
 }
 

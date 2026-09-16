@@ -69,7 +69,8 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 toward it slides you down slowly instead of falling -- press **X** again to wall-jump off it, up
 and away, with a fresh double-jump still available afterward. Walk into a pot to break it -- it may
 reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one from above to
-defeat it, or touch it from the side and it hits back.
+defeat it, or touch it from the side and it hits back. Some rooms have a swinging platform hanging
+from two segmented strings -- standing on it adds your weight, so it sags and swings underfoot.
 
 Rooms don't start with any exit -- clearing every enemy in a room (the start room has none, so
 it's already clear) reveals its powerup and marks a diggable spot on each of its 4 sides with a
@@ -88,8 +89,9 @@ full rationale and the recipe for adding a new one.
   sprites, defined in code instead of imported images), `core.collision` (AABB overlap + tile
   collision), `core.gravity`, `core.input` (gamepad edge detection), `core.rng` (deterministic
   xorshift32, used for procedural generation).
-- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`**: one entity kind each, split into
-  `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing).
+- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`, `platform/`**: one entity kind each, split
+  into `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing). `platform/` is a
+  spring-mass simulation (segmented strings holding up a rideable plank) rather than tile physics.
 - **`room/`**: one screen's 32x32 tile grid, its procedural generation, and its 4 diggable sides.
 - **`map/`**: the room graph -- generates rooms on demand, saves/restores each one's state on a
   transition, and drives wall-digging (see CLAUDE.md's `map/` section).

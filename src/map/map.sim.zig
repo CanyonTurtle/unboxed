@@ -10,6 +10,8 @@ const pot_types = @import("../pot/pot.types.zig");
 const item_types = @import("../item/item.types.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
+const platform_types = @import("../platform/platform.types.zig");
+const platform_sim = @import("../platform/platform.sim.zig");
 const char_types = @import("../character/character.types.zig");
 const map_types = @import("map.types.zig");
 
@@ -67,6 +69,14 @@ fn generateRoom(rx: u32, ry: u32) void {
             .placed = true,
         };
     }
+
+    // Anchored near the ceiling, well clear of the side walls; hang length
+    // varies so not every room's swing settles at the same height.
+    for (&save.platforms) |*plat| {
+        const left_tx = rng.between(4, room_types.GRID_W - 8);
+        const hang_tiles = rng.between(8, 20);
+        platform_sim.spawn(plat, tilePx(left_tx), tilePx(3), tilePx(hang_tiles));
+    }
 }
 
 fn saveActive() void {
@@ -76,6 +86,7 @@ fn saveActive() void {
     save.items = item_types.items;
     save.enemies = enemy_types.enemies;
     save.powerup = powerup_types.active;
+    save.platforms = platform_types.platforms;
 }
 
 fn syncOpenSides() void {
@@ -91,6 +102,7 @@ fn loadActive() void {
     item_types.items = save.items;
     enemy_types.enemies = save.enemies;
     powerup_types.active = save.powerup;
+    platform_types.platforms = save.platforms;
     dig_progress = [_]u16{0} ** 4;
     room_types.active_dig_ratio = [_]f32{0} ** 4;
     syncOpenSides();

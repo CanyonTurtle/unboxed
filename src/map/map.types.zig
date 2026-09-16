@@ -6,6 +6,7 @@ const pot_types = @import("../pot/pot.types.zig");
 const item_types = @import("../item/item.types.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
+const platform_types = @import("../platform/platform.types.zig");
 
 pub const MAP_W: u32 = 3;
 pub const MAP_H: u32 = 3;
@@ -24,6 +25,7 @@ pub const RoomSave = struct {
     items: [item_types.MAX_COUNT]item_types.Item = [_]item_types.Item{.{}} ** item_types.MAX_COUNT,
     enemies: [enemy_types.MAX_COUNT]enemy_types.Enemy = [_]enemy_types.Enemy{.{}} ** enemy_types.MAX_COUNT,
     powerup: powerup_types.Powerup = .{},
+    platforms: [platform_types.MAX_COUNT]platform_types.SwingPlatform = [_]platform_types.SwingPlatform{.{}} ** platform_types.MAX_COUNT,
 };
 
 // Each RoomSave costs ~1.3KB (mostly its 32x32 tile grid) -- fixed arrays,
