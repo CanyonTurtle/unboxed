@@ -1,0 +1,60 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # build.zig shells out to `npx -p binaryen wasm-opt` for --release=small.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Lint file sizes and comment lengths
+        run: zig build lint
+
+      - name: Run unit tests
+        run: zig build test
+
+      - name: Build cart
+        run: zig build --release=small
+
+      - name: Bundle standalone web build
+        run: |
+          mkdir -p dist
+          npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm \
+            --html dist/index.html \
+            --title "unboxed"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
