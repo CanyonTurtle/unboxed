@@ -16,8 +16,10 @@ const JUMP_VELOCITY: f32 = -4.2;
 const WALL_JUMP_PUSH: f32 = 2.0;
 const INVULN_FRAMES: u16 = 45;
 const DAMAGE_KNOCKBACK: f32 = 2.0;
+const SQUASH_FRAMES: u8 = 7;
 
 pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
+    const was_on_ground = self.on_ground;
     const moving_left = input.held(gamepad, w4.BUTTON_LEFT);
     const moving_right = input.held(gamepad, w4.BUTTON_RIGHT);
     if (moving_left) {
@@ -57,6 +59,8 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     const tiles = collision.TileQuery{ .tile_size = room_types.TILE_SIZE, .isSolid = &room_types.isSolid };
     const result = collision.moveAndCollide(&self.x, &self.y, types.WIDTH, types.HEIGHT, &self.vel_x, &self.vel_y, tiles);
     self.on_ground = result.on_ground;
+    if (!was_on_ground and self.on_ground) self.squash_timer = SQUASH_FRAMES;
+    if (self.squash_timer > 0) self.squash_timer -= 1;
 
     // Only "clinging" while airborne and still pressing into the wall that
     // stopped you -- brushing past one on the ground doesn't count.
@@ -167,4 +171,19 @@ test "wall_side clears the instant the character lands" {
     var c = types.Character{ .wall_side = 1, .on_ground = true, .vel_y = 0 };
     update(&c, w4.BUTTON_RIGHT, 0);
     try testing.expectEqual(@as(i8, 0), c.wall_side);
+}
+
+test "landing on the ground from the air starts the squash timer" {
+    room_types.active = .{};
+    room_types.active.tiles[10][6] = .ground; // a floor to land on
+    var c = types.Character{ .x = 30, .y = 42, .on_ground = false, .vel_y = 10 };
+    update(&c, 0, 0);
+    try testing.expect(c.squash_timer > 0);
+}
+
+test "the squash timer counts down and does not retrigger while already grounded" {
+    room_types.active = .{};
+    var c = types.Character{ .on_ground = true, .squash_timer = 2 };
+    update(&c, 0, 0);
+    try testing.expectEqual(@as(u8, 1), c.squash_timer);
 }

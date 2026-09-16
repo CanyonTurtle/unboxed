@@ -1,43 +1,33 @@
-// Room generation-on-demand, transitions, and wall-digging -- the one file
-// that knows both the room graph and the per-room entity arrays it saves/restores.
+// Room generation and forward-only transitions -- the one file that knows
+// both the room progression and the per-room entity arrays it copies around.
 
-const w4 = @import("../wasm4.zig");
-const input = @import("../core/core.input.zig");
 const rng_mod = @import("../core/core.rng.zig");
+const camera = @import("../core/core.camera.zig");
 const room_types = @import("../room/room.types.zig");
 const room_sim = @import("../room/room.sim.zig");
 const pot_types = @import("../pot/pot.types.zig");
 const item_types = @import("../item/item.types.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
-const platform_types = @import("../platform/platform.types.zig");
-const platform_sim = @import("../platform/platform.sim.zig");
+const particle_sim = @import("../particle/particle.sim.zig");
 const char_types = @import("../character/character.types.zig");
 const map_types = @import("map.types.zig");
 
-const ALL_SIDES = [4]room_types.Side{ .up, .down, .left, .right };
 const SEED_BASE: u32 = 0xc0ffee;
+const ROOM_SIZE: f32 = @as(f32, @floatFromInt(room_types.GRID_W)) * room_types.TILE_SIZE;
 
-// Sustained-dig charge per side of the *active* room only -- never
-// persisted, so leaving mid-dig and coming back starts the charge over.
-var dig_progress: [4]u16 = [_]u16{0} ** 4;
-
-fn seedFor(rx: u32, ry: u32) u32 {
-    return SEED_BASE +% rx *% 73856093 +% ry *% 19349663;
+fn seedFor(index: u32) u32 {
+    return SEED_BASE +% index *% 2654435761;
 }
 
 fn tilePx(t: u32) f32 {
     return @as(f32, @floatFromInt(t)) * room_types.TILE_SIZE;
 }
 
-// Fills in a room graph cell the first time it's visited (or dug towards);
-// a no-op after that, so the room's layout and remaining enemies persist.
-fn generateRoom(rx: u32, ry: u32) void {
-    var save = &map_types.rooms[ry][rx];
-    if (save.generated) return;
-    save.generated = true;
-
-    var rng = rng_mod.Rng{ .state = seedFor(rx, ry) };
+// Fills in a fresh room -- enemy count and powerup tier scale with `index`,
+// the only "how deep is this run" signal now that rooms form a line.
+fn generateInto(save: *map_types.RoomSave, index: u32, is_start: bool) void {
+    var rng = rng_mod.Rng{ .state = seedFor(index) };
     room_sim.generate(&save.room, &rng);
 
     for (&save.pots) |*pot| {
@@ -46,9 +36,7 @@ fn generateRoom(rx: u32, ry: u32) void {
     }
     for (&save.items) |*item| item.* = .{};
 
-    const depth = map_types.depth(rx, ry);
-    const depth_usize: usize = @intCast(depth);
-    const enemy_count: usize = if (depth == 0) 0 else 1 + @min(depth_usize - 1, enemy_types.MAX_COUNT - 1);
+    const enemy_count: usize = if (is_start) 0 else 1 + @min(index, enemy_types.MAX_COUNT - 1);
     for (&save.enemies, 0..) |*enemy, i| {
         if (i < enemy_count) {
             const spot = room_sim.randomFloorSpot(&save.room, &rng);
@@ -58,72 +46,42 @@ fn generateRoom(rx: u32, ry: u32) void {
         }
     }
 
-    if (depth == 0) {
+    if (is_start) {
         save.powerup = .{};
     } else {
         const spot = room_sim.randomFloorSpot(&save.room, &rng);
         save.powerup = .{
             .x = tilePx(spot.tx),
             .y = tilePx(spot.ty),
-            .kind = if (depth >= 2) .double_jump else .extra_hp,
+            .kind = if (index >= 3) .double_jump else .extra_hp,
             .placed = true,
         };
     }
-
-    // Anchored near the ceiling, well clear of the side walls; hang length
-    // varies so not every room's swing settles at the same height.
-    for (&save.platforms) |*plat| {
-        const left_tx = rng.between(4, room_types.GRID_W - 8);
-        const hang_tiles = rng.between(8, 20);
-        platform_sim.spawn(plat, tilePx(left_tx), tilePx(3), tilePx(hang_tiles));
-    }
 }
 
-fn saveActive() void {
-    var save = &map_types.rooms[map_types.current_ry][map_types.current_rx];
-    save.room = room_types.active;
-    save.pots = pot_types.pots;
-    save.items = item_types.items;
-    save.enemies = enemy_types.enemies;
-    save.powerup = powerup_types.active;
-    save.platforms = platform_types.platforms;
-}
-
-fn syncOpenSides() void {
-    for (ALL_SIDES, 0..) |side, i| {
-        room_types.active_open_sides[i] = map_types.isBroken(map_types.current_rx, map_types.current_ry, side);
+fn doorSidesFor(entered: ?room_types.Side) [4]bool {
+    var result = [_]bool{false} ** 4;
+    for (map_types.DOOR_SIDES) |side| {
+        if (map_types.isValidDoor(side, entered)) result[@intFromEnum(side)] = true;
     }
+    return result;
 }
 
 fn loadActive() void {
-    const save = &map_types.rooms[map_types.current_ry][map_types.current_rx];
-    room_types.active = save.room;
-    pot_types.pots = save.pots;
-    item_types.items = save.items;
-    enemy_types.enemies = save.enemies;
-    powerup_types.active = save.powerup;
-    platform_types.platforms = save.platforms;
-    dig_progress = [_]u16{0} ** 4;
-    room_types.active_dig_ratio = [_]f32{0} ** 4;
-    syncOpenSides();
+    room_types.active = map_types.current.room;
+    pot_types.pots = map_types.current.pots;
+    item_types.items = map_types.current.items;
+    enemy_types.enemies = map_types.current.enemies;
+    powerup_types.active = map_types.current.powerup;
+    room_types.active_door_sides = doorSidesFor(map_types.entered_from);
+    room_types.active_open_sides = [_]bool{false} ** 4;
 }
 
-fn enterRoom(rx: u32, ry: u32) void {
-    saveActive();
-    generateRoom(rx, ry);
-    map_types.current_rx = rx;
-    map_types.current_ry = ry;
-    loadActive();
-}
-
-// Resets the whole map and starts a fresh run in the start room.
-pub fn initNewMap() void {
-    map_types.rooms = .{[_]map_types.RoomSave{.{}} ** map_types.MAP_W} ** map_types.MAP_H;
-    map_types.broken_h = .{[_]bool{false} ** (map_types.MAP_W - 1)} ** map_types.MAP_H;
-    map_types.broken_v = .{[_]bool{false} ** map_types.MAP_W} ** (map_types.MAP_H - 1);
-    map_types.current_rx = map_types.START_RX;
-    map_types.current_ry = map_types.START_RY;
-    generateRoom(map_types.START_RX, map_types.START_RY);
+pub fn newRun() void {
+    map_types.room_index = 0;
+    map_types.entered_from = null;
+    map_types.transition = .{};
+    generateInto(&map_types.current, 0, true);
     loadActive();
 }
 
@@ -134,129 +92,107 @@ pub fn isRoomCleared() bool {
     return true;
 }
 
-fn overlapsRange(pos: f32, size: f32, min: f32, max: f32) bool {
-    return pos < max and pos + size > min;
-}
-
-// Is the player's box touching the (still-solid) wall at this side's gap,
-// aligned with the gap rather than elsewhere along that same wall.
-fn touchingSide(player: *const char_types.Character, side: room_types.Side) bool {
-    const ts = room_types.TILE_SIZE;
-    const room_w = tilePx(room_types.GRID_W);
-    const room_h = tilePx(room_types.GRID_H);
-    const span = room_types.exitSpan(side);
-    return switch (side) {
-        .left => player.x <= ts and overlapsRange(player.y, char_types.HEIGHT, tilePx(span.ty0), tilePx(span.ty1 + 1)),
-        .right => player.x + char_types.WIDTH >= room_w - ts and overlapsRange(player.y, char_types.HEIGHT, tilePx(span.ty0), tilePx(span.ty1 + 1)),
-        .up => player.y <= ts and overlapsRange(player.x, char_types.WIDTH, tilePx(span.tx0), tilePx(span.tx1 + 1)),
-        .down => player.y + char_types.HEIGHT >= room_h - ts and overlapsRange(player.x, char_types.WIDTH, tilePx(span.tx0), tilePx(span.tx1 + 1)),
-    };
-}
-
-fn digInput(gamepad: u8, side: room_types.Side) bool {
-    return switch (side) {
-        .left => input.held(gamepad, w4.BUTTON_LEFT),
-        .right => input.held(gamepad, w4.BUTTON_RIGHT),
-        .up => input.held(gamepad, w4.BUTTON_UP),
-        .down => input.held(gamepad, w4.BUTTON_DOWN),
-    };
-}
-
-fn breakThrough(side: room_types.Side) void {
-    map_types.setBroken(map_types.current_rx, map_types.current_ry, side);
-    room_types.active_open_sides[@intFromEnum(side)] = true;
-    // Generated right away so it already has content the instant you walk in.
-    if (map_types.neighbor(map_types.current_rx, map_types.current_ry, side)) |n| generateRoom(n.rx, n.ry);
-}
-
-// Exits only open once every enemy in the room is down. `active_dig_ratio`
-// is written purely for room.render's feedback -- it never gates anything.
-fn updateDigging(gamepad: u8, player: *const char_types.Character) void {
-    if (!isRoomCleared()) {
-        dig_progress = [_]u16{0} ** 4;
-        room_types.active_dig_ratio = [_]f32{0} ** 4;
-        return;
-    }
-    for (ALL_SIDES, 0..) |side, i| {
-        if (room_types.active_open_sides[i]) {
-            dig_progress[i] = 0;
-            room_types.active_dig_ratio[i] = 0;
-            continue;
-        }
-        const toughness = map_types.toughnessFor(map_types.current_rx, map_types.current_ry, side) orelse {
-            dig_progress[i] = 0;
-            room_types.active_dig_ratio[i] = 0;
-            continue;
-        };
-        if (touchingSide(player, side) and digInput(gamepad, side)) {
-            dig_progress[i] += 1;
-            if (dig_progress[i] >= toughness) breakThrough(side);
-        } else {
-            dig_progress[i] = 0;
-        }
-        room_types.active_dig_ratio[i] = @as(f32, @floatFromInt(dig_progress[i])) / @as(f32, @floatFromInt(toughness));
-    }
-}
-
 fn revealPowerupOnceCleared() void {
     if (powerup_types.active.placed and !powerup_types.active.revealed and isRoomCleared()) {
         powerup_types.active.revealed = true;
     }
 }
 
-// Walking fully past an open gap on the active room's edge hands off to
-// the neighbor room, entering it at the matching point on its own edge.
-fn updateEdgeCrossing(player: *char_types.Character) void {
-    const room_w = tilePx(room_types.GRID_W);
-    const room_h = tilePx(room_types.GRID_H);
-    if (player.x <= 0 and room_types.active_open_sides[@intFromEnum(room_types.Side.left)]) {
-        if (map_types.neighbor(map_types.current_rx, map_types.current_ry, .left)) |n| {
-            enterRoom(n.rx, n.ry);
-            player.x = room_w - char_types.WIDTH - 1;
-        }
-    } else if (player.x + char_types.WIDTH >= room_w and room_types.active_open_sides[@intFromEnum(room_types.Side.right)]) {
-        if (map_types.neighbor(map_types.current_rx, map_types.current_ry, .right)) |n| {
-            enterRoom(n.rx, n.ry);
-            player.x = 1;
-        }
-    } else if (player.y <= 0 and room_types.active_open_sides[@intFromEnum(room_types.Side.up)]) {
-        if (map_types.neighbor(map_types.current_rx, map_types.current_ry, .up)) |n| {
-            enterRoom(n.rx, n.ry);
-            player.y = room_h - char_types.HEIGHT - 1;
-        }
-    } else if (player.y + char_types.HEIGHT >= room_h and room_types.active_open_sides[@intFromEnum(room_types.Side.down)]) {
-        if (map_types.neighbor(map_types.current_rx, map_types.current_ry, .down)) |n| {
-            enterRoom(n.rx, n.ry);
-            player.y = 1;
-        }
+// Once cleared, every valid door opens at once -- no charge-up, just walk through.
+fn updateDoors() void {
+    if (!isRoomCleared()) return;
+    for (0..4) |i| {
+        if (room_types.active_door_sides[i]) room_types.active_open_sides[i] = true;
     }
 }
 
-pub fn update(gamepad: u8, player: *char_types.Character) void {
-    updateEdgeCrossing(player);
+// Entirely clear of the border tile -- landing even partly inside it starts
+// the character embedded in solid geometry, which collision can't recover from.
+fn entryPosition(entered: room_types.Side) struct { x: f32, y: f32 } {
+    const floor_y = tilePx(room_types.FLOOR_ROW) - char_types.HEIGHT;
+    return switch (entered) {
+        .left => .{ .x = room_types.TILE_SIZE, .y = floor_y },
+        .right => .{ .x = ROOM_SIZE - room_types.TILE_SIZE - char_types.WIDTH, .y = floor_y },
+        .up => .{ .x = ROOM_SIZE / 2 - char_types.WIDTH / 2, .y = room_types.TILE_SIZE },
+        .down => unreachable, // never a break source, so never an entry side
+    };
+}
+
+fn startTransition(dir: room_types.Side, player: *const char_types.Character) void {
+    generateInto(&map_types.next, map_types.room_index + 1, false);
+    const end = entryPosition(map_types.opposite(dir));
+    map_types.transition = .{
+        .active = true,
+        .dir = dir,
+        .frame = 0,
+        .start_x = player.x,
+        .start_y = player.y,
+        .end_x = end.x,
+        .end_y = end.y,
+    };
+}
+
+fn finishTransition(player: *char_types.Character) void {
+    const t = map_types.transition;
+    map_types.current = map_types.next;
+    map_types.entered_from = map_types.opposite(t.dir);
+    map_types.room_index += 1;
+    loadActive();
+    particle_sim.clear();
+    player.x = t.end_x;
+    player.y = t.end_y;
+    player.vel_x = 0;
+    player.vel_y = 0;
+    player.on_ground = false;
+    map_types.transition = .{};
+}
+
+// Slides the player from where the transition began to where they'll stand
+// in the next room, in lockstep with the same easing the camera uses.
+fn advanceTransition(player: *char_types.Character) void {
+    const t = &map_types.transition;
+    t.frame += 1;
+    const progress = @min(1.0, @as(f32, @floatFromInt(t.frame)) / @as(f32, @floatFromInt(map_types.TRANSITION_FRAMES)));
+    const eased = camera.easeOutQuad(progress);
+    player.x = t.start_x + (t.end_x - t.start_x) * eased;
+    player.y = t.start_y + (t.end_y - t.start_y) * eased;
+    if (t.frame >= map_types.TRANSITION_FRAMES) finishTransition(player);
+}
+
+fn maybeStartTransition(player: *const char_types.Character) void {
+    if (player.x <= 0 and room_types.active_open_sides[@intFromEnum(room_types.Side.left)]) {
+        startTransition(.left, player);
+    } else if (player.x + char_types.WIDTH >= ROOM_SIZE and room_types.active_open_sides[@intFromEnum(room_types.Side.right)]) {
+        startTransition(.right, player);
+    } else if (player.y + char_types.HEIGHT >= ROOM_SIZE and room_types.active_open_sides[@intFromEnum(room_types.Side.down)]) {
+        startTransition(.down, player);
+    }
+}
+
+pub fn update(player: *char_types.Character) void {
+    if (map_types.transition.active) {
+        advanceTransition(player);
+        return;
+    }
     revealPowerupOnceCleared();
-    updateDigging(gamepad, player);
+    updateDoors();
+    maybeStartTransition(player);
 }
 
 const testing = @import("std").testing;
 
-test "initNewMap generates and loads the start room" {
-    initNewMap();
-    try testing.expect(map_types.rooms[map_types.START_RY][map_types.START_RX].generated);
-    try testing.expectEqual(map_types.START_RX, map_types.current_rx);
-    try testing.expectEqual(map_types.START_RY, map_types.current_ry);
-}
-
-test "the start room has no enemies and no powerup, so it's cleared already" {
-    initNewMap();
+test "newRun starts a cleared room (no enemies) with all 3 doors valid" {
+    newRun();
     try testing.expect(isRoomCleared());
-    try testing.expect(!powerup_types.active.placed);
+    try testing.expect(room_types.active_door_sides[@intFromEnum(room_types.Side.left)]);
+    try testing.expect(room_types.active_door_sides[@intFromEnum(room_types.Side.right)]);
+    try testing.expect(room_types.active_door_sides[@intFromEnum(room_types.Side.down)]);
+    try testing.expect(!room_types.active_door_sides[@intFromEnum(room_types.Side.up)]);
 }
 
 test "a generated non-start room has at least one enemy and a placed powerup" {
-    initNewMap();
-    generateRoom(map_types.START_RX + 1, map_types.START_RY);
-    const save = map_types.rooms[map_types.START_RY][map_types.START_RX + 1];
+    var save: map_types.RoomSave = .{};
+    generateInto(&save, 1, false);
     var alive_count: u32 = 0;
     for (save.enemies) |e| {
         if (e.alive) alive_count += 1;
@@ -265,29 +201,41 @@ test "a generated non-start room has at least one enemy and a placed powerup" {
     try testing.expect(save.powerup.placed);
 }
 
-test "digging a cleared side long enough breaks through and opens it" {
-    initNewMap();
-    try testing.expect(isRoomCleared()); // start room has no enemies
-    const toughness = map_types.toughnessFor(map_types.START_RX, map_types.START_RY, .right).?;
+test "doors only open once the room is cleared" {
+    newRun();
+    enemy_types.enemies[0] = .{ .alive = true, .x = 5, .y = 5 };
+    var player = char_types.Character{};
+    update(&player);
+    try testing.expect(!room_types.active_open_sides[@intFromEnum(room_types.Side.right)]);
 
-    var player = char_types.Character{ .x = tilePx(room_types.GRID_W) - room_types.TILE_SIZE, .y = tilePx(room_types.FLOOR_ROW) - char_types.HEIGHT };
-    var frame: u32 = 0;
-    while (frame < toughness) : (frame += 1) update(w4.BUTTON_RIGHT, &player);
-
+    enemy_types.enemies[0].alive = false;
+    update(&player);
     try testing.expect(room_types.active_open_sides[@intFromEnum(room_types.Side.right)]);
-    try testing.expect(map_types.isBroken(map_types.START_RX, map_types.START_RY, .right));
 }
 
-test "walking through an open gap enters the neighboring room" {
-    initNewMap();
-    // Bypassing breakThrough, so mirror what it would do to active_open_sides.
-    map_types.setBroken(map_types.START_RX, map_types.START_RY, .right);
-    room_types.active_open_sides[@intFromEnum(room_types.Side.right)] = true;
+test "walking into an open door starts a transition" {
+    newRun();
+    var player = char_types.Character{ .x = ROOM_SIZE - char_types.WIDTH, .y = tilePx(room_types.FLOOR_ROW) - char_types.HEIGHT };
+    update(&player); // room already cleared -> this opens every door
+    update(&player); // touching the right edge -> starts the transition
 
-    var player = char_types.Character{ .x = tilePx(room_types.GRID_W) - char_types.WIDTH, .y = tilePx(16) };
-    update(0, &player);
+    try testing.expect(map_types.transition.active);
+    try testing.expectEqual(room_types.Side.right, map_types.transition.dir);
+}
 
-    try testing.expectEqual(map_types.START_RX + 1, map_types.current_rx);
-    try testing.expectEqual(map_types.START_RY, map_types.current_ry);
-    try testing.expectEqual(@as(f32, 1), player.x);
+test "a completed transition enters the next room from the opposite side" {
+    newRun();
+    var player = char_types.Character{ .x = ROOM_SIZE - char_types.WIDTH, .y = tilePx(room_types.FLOOR_ROW) - char_types.HEIGHT };
+    update(&player);
+    update(&player); // starts transitioning right
+
+    var i: u32 = 0;
+    while (i < map_types.TRANSITION_FRAMES) : (i += 1) update(&player);
+
+    try testing.expect(!map_types.transition.active);
+    try testing.expectEqual(room_types.Side.left, map_types.entered_from.?);
+    try testing.expectEqual(@as(u32, 1), map_types.room_index);
+    try testing.expect(!room_types.active_door_sides[@intFromEnum(room_types.Side.left)]); // no way back
+    try testing.expect(room_types.active_door_sides[@intFromEnum(room_types.Side.right)]);
+    try testing.expectEqual(room_types.TILE_SIZE, player.x);
 }

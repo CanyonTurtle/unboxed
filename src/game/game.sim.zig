@@ -1,5 +1,5 @@
 // Orchestrates one frame: advances every entity's *.sim.zig, then reacts to
-// its Event (pot breaks -> reveal item, enemy hits -> damage player).
+// its Event -- frozen except for the camera slide during a room transition.
 
 const w4 = @import("../wasm4.zig");
 const input = @import("../core/core.input.zig");
@@ -14,8 +14,9 @@ const enemy_types = @import("../enemy/enemy.types.zig");
 const enemy_sim = @import("../enemy/enemy.sim.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
 const powerup_sim = @import("../powerup/powerup.sim.zig");
-const platform_types = @import("../platform/platform.types.zig");
-const platform_sim = @import("../platform/platform.sim.zig");
+const particle_types = @import("../particle/particle.types.zig");
+const particle_sim = @import("../particle/particle.sim.zig");
+const map_types = @import("../map/map.types.zig");
 const map_sim = @import("../map/map.sim.zig");
 const state = @import("game.types.zig");
 
@@ -25,7 +26,7 @@ const EXTRA_HP_GRANT: i32 = 2;
 
 pub fn newRun() void {
     state.game = .{};
-    map_sim.initNewMap();
+    map_sim.newRun();
     char_types.player = .{
         .x = 2 * room_types.TILE_SIZE,
         .y = (@as(f32, @floatFromInt(room_types.GRID_H)) - 4) * room_types.TILE_SIZE,
@@ -62,37 +63,39 @@ pub fn update(gamepad: u8) void {
         return;
     }
 
-    char_sim.update(&char_types.player, gamepad, state.game.prev_gamepad);
-
-    for (&platform_types.platforms) |*plat| {
-        const ride = platform_sim.update(plat, char_types.player.aabb(), char_types.player.vel_y);
-        if (ride.riding) {
-            char_types.player.y = ride.top_y - char_types.HEIGHT;
-            char_types.player.x += ride.delta_x;
-            char_types.player.vel_y = 0;
-            char_types.player.on_ground = true;
-        }
+    if (map_types.transition.active) {
+        map_sim.update(&char_types.player);
+        state.game.prev_gamepad = gamepad;
+        return;
     }
 
-    map_sim.update(gamepad, &char_types.player);
+    char_sim.update(&char_types.player, gamepad, state.game.prev_gamepad);
+    map_sim.update(&char_types.player);
 
     for (&pot_types.pots) |*pot| {
-        if (pot_sim.update(pot, char_types.player.aabb()) == .broke) revealItemAt(pot.x, pot.y);
+        if (pot_sim.update(pot, char_types.player.aabb()) == .broke) {
+            revealItemAt(pot.x, pot.y);
+            particle_sim.spawnBurst(pot.x, pot.y);
+        }
     }
 
     for (&item_types.items) |*item| {
         switch (item_sim.update(item, char_types.player.aabb())) {
             .none => {},
-            .collected => |kind| switch (kind) {
-                .coin => char_types.player.score += COIN_SCORE,
-                .heart => char_types.player.hp = @min(char_types.player.hp + HEART_HEAL, char_types.player.max_hp),
+            .collected => |kind| {
+                particle_sim.spawnBurst(item.x, item.y);
+                switch (kind) {
+                    .coin => char_types.player.score += COIN_SCORE,
+                    .heart => char_types.player.hp = @min(char_types.player.hp + HEART_HEAL, char_types.player.max_hp),
+                }
             },
         }
     }
 
     for (&enemy_types.enemies) |*enemy| {
         switch (enemy_sim.update(enemy, char_types.player.aabb(), char_types.player.vel_y)) {
-            .none, .defeated => {},
+            .none => {},
+            .defeated => particle_sim.spawnBurst(enemy.x, enemy.y),
             .hit_player => |amount| char_sim.takeDamage(&char_types.player, amount, enemy.x),
         }
     }
@@ -102,6 +105,8 @@ pub fn update(gamepad: u8) void {
         .collected => |kind| grantPowerup(kind),
     }
 
+    particle_sim.update();
+
     if (char_types.player.hp <= 0) state.game.game_over = true;
 
     state.game.prev_gamepad = gamepad;
@@ -109,20 +114,19 @@ pub fn update(gamepad: u8) void {
 
 const testing = @import("std").testing;
 
-test "newRun resets hp/score/upgrades and starts in the start room" {
-    const map_types = @import("../map/map.types.zig");
+test "newRun resets hp/score/upgrades and starts a fresh room" {
     newRun();
     try testing.expectEqual(char_types.BASE_MAX_HP, char_types.player.hp);
     try testing.expectEqual(char_types.BASE_MAX_HP, char_types.player.max_hp);
     try testing.expectEqual(@as(u32, 0), char_types.player.score);
     try testing.expect(!char_types.player.has_double_jump);
-    try testing.expectEqual(map_types.START_RX, map_types.current_rx);
-    try testing.expectEqual(map_types.START_RY, map_types.current_ry);
+    try testing.expectEqual(@as(u32, 0), map_types.room_index);
 }
 
-// Clears every pot/enemy/item/powerup so a test can place exactly the one
-// it cares about without incidentally colliding with newRun's placements.
+// Clears every pot/enemy/item/powerup, and the room's own generated
+// terrain, so a test's hardcoded position can never collide with either.
 fn clearField() void {
+    room_types.active = .{};
     for (&pot_types.pots) |*p| p.* = .{ .broken = true };
     for (&enemy_types.enemies) |*e| e.* = .{ .alive = false };
     for (&item_types.items) |*it| it.* = .{};
@@ -188,43 +192,18 @@ test "player hp reaching zero ends the run" {
     try testing.expect(state.game.game_over);
 }
 
-test "riding a swinging platform holds the player up instead of falling through" {
+test "defeating an enemy spawns particles" {
     newRun();
     clearField();
-    const plat = &platform_types.platforms[0];
-    platform_sim.spawn(plat, 40, 10, 40);
-    char_types.player = .{ .x = plat.body.x, .y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT };
+    particle_sim.clear();
+    enemy_types.enemies[0] = .{ .x = 40, .y = 40, .alive = true };
+    char_types.player = .{ .x = 40, .y = 36, .vel_y = 2 }; // falling, mostly above -> a stomp
 
-    var i: u32 = 0;
-    while (i < 20) : (i += 1) update(0);
+    update(0);
 
-    try testing.expect(char_types.player.on_ground);
-    const expected_y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT;
-    try testing.expect(@abs(char_types.player.y - expected_y) < 3);
-}
-
-test "leaving a platform after riding falls normally onto the real floor" {
-    newRun();
-    clearField();
-    // Strip the room's own random clutter platforms so only the true floor
-    // and our injected swing are in play -- keeps this test deterministic.
-    for (1..room_types.GRID_H - 1) |ty| {
-        if (ty == room_types.FLOOR_ROW) continue;
-        for (1..room_types.GRID_W - 1) |tx| room_types.active.tiles[ty][tx] = .empty;
+    var live: u32 = 0;
+    for (particle_types.particles) |p| {
+        if (p.life > 0) live += 1;
     }
-
-    const plat = &platform_types.platforms[0];
-    platform_sim.spawn(plat, 40, 10, 100); // longest hang map.sim generates, sustained riding stresses the sag clamp
-    char_types.player = .{ .x = plat.body.x, .y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT };
-
-    var i: u32 = 0;
-    while (i < 300) : (i += 1) update(0); // ride it a long while, sagging toward the clamp
-
-    char_types.player.x = 5; // step off, away from the plank
-    i = 0;
-    while (i < 200) : (i += 1) update(0);
-
-    try testing.expect(char_types.player.on_ground);
-    const floor_y = @as(f32, @floatFromInt(room_types.FLOOR_ROW)) * room_types.TILE_SIZE - char_types.HEIGHT;
-    try testing.expectEqual(floor_y, char_types.player.y);
+    try testing.expect(live > 0);
 }

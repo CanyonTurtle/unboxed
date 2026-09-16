@@ -3,7 +3,6 @@
 
 const char_types = @import("character/character.types.zig");
 const map_types = @import("map/map.types.zig");
-const platform_types = @import("platform/platform.types.zig");
 const state = @import("game/game.types.zig");
 
 pub fn getHp() callconv(.c) i32 {
@@ -26,18 +25,15 @@ pub fn getPlayerY() callconv(.c) i32 {
     return @intFromFloat(char_types.player.y);
 }
 
-pub fn getRoomX() callconv(.c) u32 {
-    return map_types.current_rx;
+pub fn getRoomIndex() callconv(.c) u32 {
+    return map_types.room_index;
 }
 
-pub fn getRoomY() callconv(.c) u32 {
-    return map_types.current_ry;
+pub fn getTransitionActive() callconv(.c) u32 {
+    return @intFromBool(map_types.transition.active);
 }
 
-pub fn getPlatformX() callconv(.c) i32 {
-    return @intFromFloat(platform_types.platforms[0].body.x);
+pub fn getTransitionFrame() callconv(.c) u32 {
+    return map_types.transition.frame;
 }
 
-pub fn getPlatformY() callconv(.c) i32 {
-    return @intFromFloat(platform_types.platforms[0].body.y);
-}

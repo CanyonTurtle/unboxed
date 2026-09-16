@@ -29,6 +29,9 @@ pub const Character = struct {
     // Which side a wall is on while airborne and pressing into it (-1 left,
     // 0 none, 1 right) -- drives wall-slide and wall-jump (character.sim).
     wall_side: i8 = 0,
+    // Nonzero for a few frames right after landing -- character.render
+    // shows a squashed pose while it counts down (character.sim.update).
+    squash_timer: u8 = 0,
 
     pub fn aabb(self: Character) collision.Rect {
         return .{ .x = self.x, .y = self.y, .w = WIDTH, .h = HEIGHT };

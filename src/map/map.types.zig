@@ -1,128 +1,88 @@
-// The room graph: a small grid of rooms, each remembering its own room/
-// entities once generated, so leaving and returning preserves its state.
+// Forward-only room progression: you can never go back, so only the
+// current room and the one you're transitioning into ever need to exist.
 
 const room_types = @import("../room/room.types.zig");
 const pot_types = @import("../pot/pot.types.zig");
 const item_types = @import("../item/item.types.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
-const platform_types = @import("../platform/platform.types.zig");
-
-pub const MAP_W: u32 = 3;
-pub const MAP_H: u32 = 3;
-pub const START_RX: u32 = 1;
-pub const START_RY: u32 = 1;
-
-// How long (frames) sustained digging takes -- scales with the depth of
-// the room on the other side, so a better reward takes more commitment.
-pub const BASE_TOUGHNESS: u16 = 90;
-pub const TOUGHNESS_STEP: u16 = 90;
 
 pub const RoomSave = struct {
-    generated: bool = false,
     room: room_types.Room = .{},
     pots: [pot_types.MAX_COUNT]pot_types.Pot = [_]pot_types.Pot{.{}} ** pot_types.MAX_COUNT,
     items: [item_types.MAX_COUNT]item_types.Item = [_]item_types.Item{.{}} ** item_types.MAX_COUNT,
     enemies: [enemy_types.MAX_COUNT]enemy_types.Enemy = [_]enemy_types.Enemy{.{}} ** enemy_types.MAX_COUNT,
     powerup: powerup_types.Powerup = .{},
-    platforms: [platform_types.MAX_COUNT]platform_types.SwingPlatform = [_]platform_types.SwingPlatform{.{}} ** platform_types.MAX_COUNT,
 };
 
-// Each RoomSave costs ~1.3KB (mostly its 32x32 tile grid) -- fixed arrays,
-// no allocator, since WASM-4 carts get one fixed 64KB memory page total.
-pub var rooms: [MAP_H][MAP_W]RoomSave = .{[_]RoomSave{.{}} ** MAP_W} ** MAP_H;
+pub var current: RoomSave = .{};
+pub var next: RoomSave = .{};
 
-pub var current_rx: u32 = START_RX;
-pub var current_ry: u32 = START_RY;
+// Which side of `current` the player walked in through -- null only for the
+// very first room, which has no entry side and so no side to exclude.
+pub var entered_from: ?room_types.Side = null;
 
-// Shared per-edge state (one bool per wall, not per room per side):
-// broken_h[ry][rx] is the wall between (rx,ry)-(rx+1,ry); broken_v likewise for (rx,ry)-(rx,ry+1).
-pub var broken_h: [MAP_H][MAP_W - 1]bool = .{[_]bool{false} ** (MAP_W - 1)} ** MAP_H;
-pub var broken_v: [MAP_H - 1][MAP_W]bool = .{[_]bool{false} ** MAP_W} ** (MAP_H - 1);
+// Increases every transition; the only source of "how deep is this run" now
+// that there's no room-graph coordinate to measure distance from.
+pub var room_index: u32 = 0;
 
-fn absDiff(a: u32, b: u32) u32 {
-    return if (a > b) a - b else b - a;
-}
+pub const TRANSITION_FRAMES: u16 = 18;
 
-// Manhattan distance from the start room -- the fewest room-to-room hops
-// (only cardinal moves exist) needed to reach it, i.e. how deep it is.
-pub fn depth(rx: u32, ry: u32) u32 {
-    return absDiff(rx, START_RX) + absDiff(ry, START_RY);
-}
+pub const Transition = struct {
+    active: bool = false,
+    dir: room_types.Side = .left,
+    frame: u16 = 0,
+    start_x: f32 = 0,
+    start_y: f32 = 0,
+    end_x: f32 = 0,
+    end_y: f32 = 0,
+};
+pub var transition: Transition = .{};
 
-pub fn neighbor(rx: u32, ry: u32, side: room_types.Side) ?struct { rx: u32, ry: u32 } {
+// A door can only ever open on these 3 sides -- reaching "up" is real
+// platforming (see room.types.exitSpan), never a way to leave the room.
+pub const DOOR_SIDES = [3]room_types.Side{ .left, .right, .down };
+
+pub fn opposite(side: room_types.Side) room_types.Side {
     return switch (side) {
-        .up => if (ry == 0) null else .{ .rx = rx, .ry = ry - 1 },
-        .down => if (ry >= MAP_H - 1) null else .{ .rx = rx, .ry = ry + 1 },
-        .left => if (rx == 0) null else .{ .rx = rx - 1, .ry = ry },
-        .right => if (rx >= MAP_W - 1) null else .{ .rx = rx + 1, .ry = ry },
+        .up => .down,
+        .down => .up,
+        .left => .right,
+        .right => .left,
     };
 }
 
-pub fn isBroken(rx: u32, ry: u32, side: room_types.Side) bool {
-    return switch (side) {
-        .right => rx < MAP_W - 1 and broken_h[ry][rx],
-        .left => rx > 0 and broken_h[ry][rx - 1],
-        .down => ry < MAP_H - 1 and broken_v[ry][rx],
-        .up => ry > 0 and broken_v[ry - 1][rx],
-    };
-}
-
-pub fn setBroken(rx: u32, ry: u32, side: room_types.Side) void {
-    switch (side) {
-        .right => if (rx < MAP_W - 1) {
-            broken_h[ry][rx] = true;
-        },
-        .left => if (rx > 0) {
-            broken_h[ry][rx - 1] = true;
-        },
-        .down => if (ry < MAP_H - 1) {
-            broken_v[ry][rx] = true;
-        },
-        .up => if (ry > 0) {
-            broken_v[ry - 1][rx] = true;
-        },
+// A room's valid doors: every DOOR_SIDES entry except whichever one you
+// entered through -- never a way straight back to the room you just left.
+pub fn isValidDoor(side: room_types.Side, entered: ?room_types.Side) bool {
+    if (entered != null and side == entered.?) return false;
+    for (DOOR_SIDES) |s| {
+        if (s == side) return true;
     }
-}
-
-// How long digging this side takes, or null if there's no room over there
-// to dig into at all (a permanent map-edge wall).
-pub fn toughnessFor(rx: u32, ry: u32, side: room_types.Side) ?u16 {
-    const n = neighbor(rx, ry, side) orelse return null;
-    return BASE_TOUGHNESS + @as(u16, @intCast(depth(n.rx, n.ry))) * TOUGHNESS_STEP;
+    return false;
 }
 
 const testing = @import("std").testing;
 
-test "depth is 0 at the start room and grows with Chebyshev distance" {
-    try testing.expectEqual(@as(u32, 0), depth(START_RX, START_RY));
-    try testing.expectEqual(@as(u32, 1), depth(START_RX + 1, START_RY));
-    try testing.expectEqual(@as(u32, 1), depth(START_RX, START_RY - 1));
+test "opposite is its own inverse for every side" {
+    inline for (.{ room_types.Side.up, .down, .left, .right }) |side| {
+        try testing.expectEqual(side, opposite(opposite(side)));
+    }
 }
 
-test "neighbor returns null at the map's edges" {
-    try testing.expect(neighbor(0, 0, .up) == null);
-    try testing.expect(neighbor(0, 0, .left) == null);
-    try testing.expect(neighbor(MAP_W - 1, MAP_H - 1, .right) == null);
-    try testing.expect(neighbor(MAP_W - 1, MAP_H - 1, .down) == null);
+test "isValidDoor excludes the entry side but allows the other two" {
+    try testing.expect(!isValidDoor(.left, .left));
+    try testing.expect(isValidDoor(.right, .left));
+    try testing.expect(isValidDoor(.down, .left));
 }
 
-test "setBroken on one room's side is visible from the neighbor's own side" {
-    broken_h = .{[_]bool{false} ** (MAP_W - 1)} ** MAP_H;
-    broken_v = .{[_]bool{false} ** MAP_W} ** (MAP_H - 1);
-    setBroken(START_RX, START_RY, .right);
-    try testing.expect(isBroken(START_RX, START_RY, .right));
-    try testing.expect(isBroken(START_RX + 1, START_RY, .left));
-    try testing.expect(!isBroken(START_RX, START_RY, .up));
+test "isValidDoor never allows up, entry side or not" {
+    try testing.expect(!isValidDoor(.up, null));
+    try testing.expect(!isValidDoor(.up, .left));
 }
 
-test "toughnessFor is null past the map edge and scales with the neighbor's depth" {
-    try testing.expect(toughnessFor(0, 0, .left) == null);
-
-    // Start -> an edge-adjacent room (depth 1) vs. an edge room -> a corner
-    // (depth 2): the corner-bound wall should take strictly longer to dig.
-    const shallow = toughnessFor(START_RX, START_RY, .right).?;
-    const deeper = toughnessFor(MAP_W - 1, START_RY, .down).?;
-    try testing.expectEqual(BASE_TOUGHNESS + TOUGHNESS_STEP, shallow);
-    try testing.expect(deeper > shallow);
+test "with no entry side (the start room), all 3 door sides are valid" {
+    try testing.expect(isValidDoor(.left, null));
+    try testing.expect(isValidDoor(.right, null));
+    try testing.expect(isValidDoor(.down, null));
 }

@@ -1,8 +1,8 @@
 # unboxed
 
 A procedurally-generated roguelike-platformer for the [WASM-4](https://wasm4.org) fantasy console,
-written in Zig. Move, jump, break pots, collect items, and clear rooms of enemies to dig through
-their walls into a small connected map of freshly-generated rooms, picking up permanent powerups
+written in Zig. Move, jump, break pots, collect items, and clear each room of enemies to move on
+through one of its doors into a fresh room further down the line, picking up permanent powerups
 along the way.
 
 This repo is also a from-scratch reboot of an earlier platformer's architecture -- see
@@ -68,16 +68,14 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 **Arrow keys** move, **X** jumps (and double-jumps, once unlocked). Jumping into a wall and holding
 toward it slides you down slowly instead of falling -- press **X** again to wall-jump off it, up
 and away, with a fresh double-jump still available afterward. Walk into a pot to break it -- it may
-reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one from above to
-defeat it, or touch it from the side and it hits back. Some rooms have a swinging platform hanging
-from two segmented strings -- standing on it adds your weight, so it sags and swings underfoot.
+reveal a coin (score) or a heart (heals), with a little burst of particles. Enemies patrol back and
+forth: jump on one from above to defeat it, or touch it from the side and it hits back.
 
-Rooms don't start with any exit -- clearing every enemy in a room (the start room has none, so
-it's already clear) reveals its powerup and marks a diggable spot on each of its 4 sides with a
-distinct checkered pattern. Walk into one and hold the direction toward it (**up**/**down** for the
-top/bottom walls) to charge through -- the spot turns red and the HUD shows your progress while
-you're digging. Walls guarding a room further from the start take longer to dig through, but that
-room's reward is better for it. Losing all your HP ends the run; press **X** to start a fresh map.
+Every room starts with its doors shut -- clearing every enemy in it (the first room has none, so
+it's already clear) reveals its powerup and opens a door on each side that isn't the one you came
+in through (never up, which stays real platforming). Walk through any open one and the camera eases
+into a fresh room further down the line -- there's no going back, so every room is new. Losing all
+your HP ends the run; press **X** to start over.
 
 ## Project layout
 
@@ -89,12 +87,13 @@ full rationale and the recipe for adding a new one.
   sprites, defined in code instead of imported images), `core.collision` (AABB overlap + tile
   collision), `core.gravity`, `core.input` (gamepad edge detection), `core.rng` (deterministic
   xorshift32, used for procedural generation).
-- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`, `platform/`**: one entity kind each, split
-  into `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing). `platform/` is a
-  spring-mass simulation (segmented strings holding up a rideable plank) rather than tile physics.
-- **`room/`**: one screen's 32x32 tile grid, its procedural generation, and its 4 diggable sides.
-- **`map/`**: the room graph -- generates rooms on demand, saves/restores each one's state on a
-  transition, and drives wall-digging (see CLAUDE.md's `map/` section).
+- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`, `particle/`**: one entity kind each, split
+  into `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing). `particle/` is the
+  odd one out -- short-lived visual pops with no player interaction, spawned by `game.sim` whenever
+  something breaks/dies/gets collected.
+- **`room/`**: one screen's 32x32 tile grid, its procedural generation, and its (up to 3) doors.
+- **`map/`**: the forward-only room progression -- generates the next room the instant you touch an
+  open door, and drives the eased camera transition into it (see CLAUDE.md's `map/` section).
 - **`game/`**: the orchestrator -- `game.sim.zig` advances every entity and reacts to the events
   they report (a broken pot reveals an item, a collected coin adds score, a collected powerup
   permanently upgrades the player, ...); `game.render.zig` draws everything in order plus the HUD.

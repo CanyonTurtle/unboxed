@@ -23,17 +23,17 @@ const HEART_SPRITE = sprite_mod.fromArt(&.{
     "...#...",
 });
 
-pub fn draw(item: types.Item) void {
+pub fn draw(item: types.Item, offset_x: i32, offset_y: i32) void {
     if (item.collected) return;
-    const x: i32 = @intFromFloat(item.x);
-    const y: i32 = @intFromFloat(item.y);
+    const x: i32 = @as(i32, @intFromFloat(item.x)) + offset_x;
+    const y: i32 = @as(i32, @intFromFloat(item.y)) + offset_y;
     switch (item.kind) {
         .coin => {
-            w4.DRAW_COLORS.* = 0x0030; // color2 = palette[2]
+            w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3] (yellow)
             COIN_SPRITE.draw(x, y, false);
         },
         .heart => {
-            w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3]
+            w4.DRAW_COLORS.* = 0x0030; // color2 = palette[2] (red)
             HEART_SPRITE.draw(x, y, false);
         },
     }

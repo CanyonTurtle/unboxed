@@ -41,10 +41,10 @@ if a file would blow the 500-line limit below, that's a sign the concept
 itself should split into two folders, not that one file should become two.
 
 Current concepts, as a reference: `character`, `pot`, `item`, `enemy`,
-`powerup` (a permanent player upgrade), `platform` (a spring-physics
-swinging platform -- see below), `room` (one screen's tile grid +
-procedural generation), `map` (the room graph -- see below), and `game`
-(the orchestrator tying every other concept together -- see below).
+`powerup` (a permanent player upgrade), `particle` (short-lived visual pops
+-- see below), `room` (one screen's tile grid + procedural generation),
+`map` (the forward-only room progression -- see below), and `game` (the
+orchestrator tying every other concept together -- see below).
 
 ### `core/` -- shared behavior, not shared entities
 
@@ -84,51 +84,69 @@ increases score). No entity module ever imports another entity's
 `.types.zig` or `.sim.zig` directly -- if you find yourself wanting to,
 route the interaction through `game.sim.zig` and an `Event` instead.
 
-The same rule applies when one entity needs to *move* another, not just
-react to it: `platform.sim.update` takes the player as a plain `Rect` +
-`f32` (never `character.types.Character`) and returns a `RideResult`
-(riding?, new top height, horizontal drift) instead of writing to the
-player itself -- `game.sim.zig` is what actually assigns the result onto
-`character.types.player`. A result struct works the same way `Event` does;
-reach for whichever shape fits (a fired-once occurrence vs. an ongoing
-per-frame state) but keep the direction of control the same either way.
+The same rule applies if an entity ever needs to *move* another, not just
+react to it: report a plain-data result (never importing `character.types`
+directly) and let `game.sim.zig` apply it, the same "hand back a result,
+don't reach into another entity" shape `Event` already uses.
 
 ## The render contract
 
 Every `*.render.zig` exposes:
 
 ```zig
-pub fn draw(self: Thing) void
+pub fn draw(self: Thing, offset_x: i32, offset_y: i32) void
 ```
 
 A pure side effect on the WASM-4 framebuffer, no return value, no mutation
-of `self`. `game.render.zig` is the one file that calls every entity's
-`draw` in the right order (terrain, then entities back-to-front, then the
-character, then the HUD) -- the only thing that changes there when a new
-entity kind shows up is one more loop.
+of `self`. The offset is always `(0, 0)` outside a room transition; during
+one, `game.render.zig` draws the whole scene twice, once per room, each at
+its own sliding offset (see "`map/`" below) -- everything room-scoped takes
+one so it can slide. `character.render.zig` is the one exception: the
+player's own position is animated directly during a transition (see
+`map.sim.advanceTransition`), so it never needs an offset.
+`game.render.zig` calls every entity's `draw` in order (terrain, entities
+back-to-front, character, HUD) -- the only thing that changes there when a
+new entity kind shows up is one more loop.
 
 Sprites are defined as top-level `const` ASCII art right in the
-`*.render.zig` that uses them (see `core.sprite.fromArt`'s doc comment).
-Terrain (`room.render.zig`) is flat-colored rects instead -- it has no
-silhouette worth a sprite asset.
+`*.render.zig` that uses them (see `core.sprite.fromArt`'s doc comment) --
+including terrain now (`room.render.zig`'s `GROUND_VARIANTS`/
+`WALL_VARIANTS`/`DOOR_SPRITE`), so floor/wall/door read as different
+shapes even though they share one color.
 
-## `map/`: the one locality allowed to know every entity's shape
+## `map/`: forward-only rooms, the one locality allowed to know every entity's shape
 
-The room graph (`map.types.RoomSave`) persists a room's tiles *and* its
-pots/items/enemies/powerup, so leaving and returning preserves state -- that
-means `map.types.zig` necessarily imports every persisted entity's
-`.types.zig` just to declare storage for it. This is the one deliberate
-exception to "entities don't know about each other": **if you add a new
-entity kind that should survive a room transition, also add a field for it
-to `RoomSave` and a line each to `map.sim.zig`'s `saveActive`/`loadActive`.**
-Forgetting this doesn't break the build -- it just silently resets that
-entity every time the player changes rooms, so don't forget it.
+Rooms form a line, not a grid: clearing a room (every enemy dead) opens a
+door on each of its unused sides -- **left, right, and down; never up**,
+which stays real platforming, not a way out -- except the one you entered
+through, so there's never a way back. Walking into an open door starts a
+short eased camera transition (`map.types.TRANSITION_FRAMES`,
+`core.camera.easeOutQuad`) into a freshly-generated room. Because you can
+never revisit a room, **only two ever need to exist at once**:
+`map.types.current` and `map.types.next` (generated the instant you touch
+an open door, swapped in once the transition finishes). There's no
+room-graph coordinate system to store, and no per-wall toughness to tune --
+`map.types.room_index` (just a counter) is the only "how deep is this run"
+signal, driving enemy count and powerup tier in `map.sim.generateInto`.
 
-`map.sim.zig` also owns a second per-frame entry point, `update(gamepad,
-player)`, parallel to `game.sim.update` -- it handles room transitions and
-wall-digging, the two things that need the room graph rather than just the
-active room. `game.sim.zig` calls it once per frame alongside the per-entity
-loops it already owns.
+`RoomSave` persists a room's tiles *and* its pots/items/enemies/powerup, so
+`map.types.zig` necessarily imports every persisted entity's `.types.zig`
+just to declare storage for it. This is the one deliberate exception to
+"entities don't know about each other": **if you add a new entity kind
+that should survive a room transition, also add a field for it to
+`RoomSave` and a line each to `map.sim.zig`'s save/load.** Forgetting this
+doesn't break the build -- it just silently resets that entity on the next
+transition, so don't forget it.
+
+`map.sim.zig` owns a second per-frame entry point, `update(player)`,
+parallel to `game.sim.update` -- while a transition is active it's the
+*only* thing that runs (`game.sim` skips every other entity that frame, so
+nothing update()s mid-slide); otherwise it checks for a cleared room and a
+touched door. During a transition it also directly drives `player.x`/`y`
+(eased from where they touched the door to their entry point in the next
+room, see `map.sim.entryPosition`) -- the one other place, besides a
+`RideResult`-style report, where a non-`game.sim` file is allowed to move
+the player, since the player *is* what's transitioning.
 
 ## State: `pub var`, one per locality
 
@@ -173,24 +191,18 @@ kind's `.sim.zig` (the effect) and `.render.zig` (the sprite). See
 entity kinds will want it; otherwise start it in the one locality that
 needs it and promote it later (see "core/" above).
 
-**The room graph today**: `map.types.zig` lays out a fixed `MAP_W x MAP_H`
-grid of rooms (see its header). Each room is still exactly one 160x160
-screen with no camera -- moving to a neighbor is an instant room swap
-(`map.sim.enterRoom`), not a scrolling transition. A wall between two rooms
-opens once its room is cleared and a player digs into it long enough (see
-`map.sim.updateDigging`/`toughnessFor`); the reward waiting past a wall
-scales with that room's `map.types.depth`.
+**A new door direction, or letting the player go back**: today only left/
+right/down ever open (`map.types.DOOR_SIDES`), and `entered_from` always
+excludes going straight back. Changing either means revisiting
+`map.sim.entryPosition` (where a new arrival lands) too -- get that wrong
+and a player can spawn overlapping solid terrain (see the `git log` note on
+`entryPosition`'s own comment for what that looked like when it happened).
 
-**Adding real camera scrolling** (rooms rendered mid-slide into each other)
-would layer on top of this without changing the room graph: a
-`core.camera.zig` holding a viewport offset, applied by every
-`*.render.zig`'s draw coordinates, plus `map.sim` driving the offset during
-a transition instead of snapping. `core.collision` already only deals in
-tile coordinates, not screen ones, so entity sim code wouldn't need to change.
-
-**Growing the map's size**: bump `MAP_W`/`MAP_H` in `map.types.zig`. Each
-room costs ~1.3KB of the cart's fixed 64KB memory (see the comment on
-`map.types.rooms`) -- keep an eye on total size as the map grows.
+**Placing anything new at a fixed spot in a room**: keep it clear of the
+border tile on whichever side it's near. `core.collision` has no defined
+behavior for a box that starts already overlapping solid ground, and the
+symptom (a wildly diverging position a few frames later, not an obvious
+crash) is easy to mistake for something else entirely.
 
 ## House style
 
@@ -227,16 +239,29 @@ useful for eyeballing a `*.render.zig` change, since those files are
 excluded from `zig build test`. `tools/poll-ci.sh` polls GitHub Actions for
 a commit's run status.
 
+## Look: a strict 4-color palette
+
+`main.zig`'s `PALETTE` is black (background), white (all terrain --
+floor/platforms/walls/doors, shape-only distinction), red, and yellow
+(entities split across the two -- see each `*.render.zig`'s `DRAW_COLORS`
+comment for which). Adding a 5th "color" isn't possible on WASM-4 hardware;
+a new entity kind reuses red or yellow and leans on its sprite silhouette
+to read as distinct, the same way pots (white) already share a color with
+terrain.
+
 ## What's actually implemented here
 
 This is a **prototype of the pattern**, not the game itself: one character
-(move/jump/double-jump/gravity/collision), one pot (breaks on contact), two
-item kinds (coin/heart) and two powerup kinds (extra_hp/double_jump, one per
-room, revealed once its enemies are cleared), one enemy kind (patrols, stomp
-to defeat or it hits back), and a small graph of procedurally-generated
-rooms connected by diggable walls. Each room's 5x5 terrain tiles come in a
-small rotation of ASCII-art variants (`room.render.zig`) for texture. The
+(move/jump/double-jump/wall-jump/squash-on-land/gravity/collision) with a
+pose per motion state (rise/peak/fall/squash, `character.render.zig`), one
+pot (breaks on contact), two item kinds (coin/heart) and two powerup kinds
+(extra_hp/double_jump, one per room, revealed once its enemies are
+cleared), one enemy kind (patrols, stomp to defeat or it hits back),
+`particle`'s small pops on every break/defeat/collect, and a forward-only
+line of procedurally-generated rooms joined by an eased camera slide (see
+"`map/`" above). Each room's 5x5 terrain tiles come in a small rotation of
+ASCII-art variants (`room.render.zig`) for shape, not color, variety. The
 goal was a scalable skeleton with a couple of moving, testable,
 visibly-working pieces -- fleshing out real content (more enemies, items,
-powerups, room variety, actual "battle" depth, a bigger map) is exactly
+powerups, room variety, actual "battle" depth, a longer run) is exactly
 what the recipes above are for.

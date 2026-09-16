@@ -16,15 +16,14 @@ comptime {
         @export(&debug.isGameOver, .{ .name = "debugIsGameOver" });
         @export(&debug.getPlayerX, .{ .name = "debugGetPlayerX" });
         @export(&debug.getPlayerY, .{ .name = "debugGetPlayerY" });
-        @export(&debug.getRoomX, .{ .name = "debugGetRoomX" });
-        @export(&debug.getRoomY, .{ .name = "debugGetRoomY" });
-        @export(&debug.getPlatformX, .{ .name = "debugGetPlatformX" });
-        @export(&debug.getPlatformY, .{ .name = "debugGetPlatformY" });
+        @export(&debug.getRoomIndex, .{ .name = "debugGetRoomIndex" });
+        @export(&debug.getTransitionActive, .{ .name = "debugGetTransitionActive" });
+        @export(&debug.getTransitionFrame, .{ .name = "debugGetTransitionFrame" });
     }
 }
 
 export fn start() void {
-    w4.PALETTE.* = .{ 0x1a1c2c, 0xf4f4f4, 0x3a4466, 0xb13e53 };
+    w4.PALETTE.* = .{ 0x000000, 0xffffff, 0xe83b3b, 0xf6d32d };
     game_sim.newRun();
 }
 

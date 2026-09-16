@@ -4,15 +4,16 @@
 const types = @import("room.types.zig");
 const rng_mod = @import("../core/core.rng.zig");
 
-const PLATFORM_COUNT = 5;
-const PLATFORM_MIN_WIDTH = 3;
+const PLATFORM_MIN_COUNT = 4;
+const PLATFORM_MAX_COUNT = 8;
+const PLATFORM_MIN_WIDTH = 2;
 const PLATFORM_MAX_WIDTH = 6;
 // Tile rows kept clear above the floor -- fewer would leave a gap shorter
-// than the 8px character, sealing the floor (and its exits) off entirely.
+// than the 8px character, sealing the floor (and its doors) off entirely.
 const FLOOR_CLEARANCE_ROWS = 3;
 
 // Border walls, a solid ground floor one row up from the bottom, and a
-// handful of floating platforms at random heights/widths.
+// random handful of floating platforms at varied heights/widths/counts.
 pub fn generate(room: *types.Room, rng: *rng_mod.Rng) void {
     for (0..types.GRID_H) |ty| {
         for (0..types.GRID_W) |tx| {
@@ -24,8 +25,9 @@ pub fn generate(room: *types.Room, rng: *rng_mod.Rng) void {
     const floor_y = types.FLOOR_ROW;
     for (1..types.GRID_W - 1) |tx| room.tiles[floor_y][tx] = .ground;
 
+    const platform_count = rng.between(PLATFORM_MIN_COUNT, PLATFORM_MAX_COUNT);
     var i: u32 = 0;
-    while (i < PLATFORM_COUNT) : (i += 1) {
+    while (i < platform_count) : (i += 1) {
         const py = rng.between(4, floor_y - FLOOR_CLEARANCE_ROWS - 1);
         const px = rng.between(2, types.GRID_W - 6);
         const width = rng.between(PLATFORM_MIN_WIDTH, PLATFORM_MAX_WIDTH);
