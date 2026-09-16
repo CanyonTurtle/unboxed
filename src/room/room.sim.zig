@@ -4,9 +4,12 @@
 const types = @import("room.types.zig");
 const rng_mod = @import("../core/core.rng.zig");
 
-const PLATFORM_COUNT = 7;
+const PLATFORM_COUNT = 5;
 const PLATFORM_MIN_WIDTH = 3;
-const PLATFORM_MAX_WIDTH = 7;
+const PLATFORM_MAX_WIDTH = 6;
+// Tile rows kept clear above the floor -- fewer would leave a gap shorter
+// than the 8px character, sealing the floor (and its exits) off entirely.
+const FLOOR_CLEARANCE_ROWS = 3;
 
 // Border walls, a solid ground floor one row up from the bottom, and a
 // handful of floating platforms at random heights/widths.
@@ -23,7 +26,7 @@ pub fn generate(room: *types.Room, rng: *rng_mod.Rng) void {
 
     var i: u32 = 0;
     while (i < PLATFORM_COUNT) : (i += 1) {
-        const py = rng.between(4, floor_y - 2);
+        const py = rng.between(4, floor_y - FLOOR_CLEARANCE_ROWS - 1);
         const px = rng.between(2, types.GRID_W - 6);
         const width = rng.between(PLATFORM_MIN_WIDTH, PLATFORM_MAX_WIDTH);
         var w: u32 = 0;
@@ -70,6 +73,22 @@ test "generate lays a full solid ground floor" {
     generate(&room, &rng);
     for (1..types.GRID_W - 1) |tx| {
         try testing.expect(room.tiles[types.FLOOR_ROW][tx] != .empty);
+    }
+}
+
+test "generate never places a platform close enough to seal off the floor" {
+    const testing = @import("std").testing;
+    var seed: u32 = 0;
+    while (seed < 30) : (seed += 1) {
+        var room: types.Room = .{};
+        var rng = rng_mod.Rng{ .state = seed };
+        generate(&room, &rng);
+        var ty = types.FLOOR_ROW - FLOOR_CLEARANCE_ROWS;
+        while (ty < types.FLOOR_ROW) : (ty += 1) {
+            for (1..types.GRID_W - 1) |tx| {
+                try testing.expect(room.tiles[ty][tx] == .empty);
+            }
+        }
     }
 }
 
