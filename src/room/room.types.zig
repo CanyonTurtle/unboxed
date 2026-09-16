@@ -29,15 +29,15 @@ const EXIT_SPAN: u32 = 3; // tiles wide, centered on the side
 pub const TileSpan = struct { tx0: u32, tx1: u32, ty0: u32, ty1: u32 };
 
 // The fixed tile range a side's gap occupies, whether or not it's open yet.
-// up/down sit mid-wall (real platforming to reach); left/right sit at floor height.
+// left/right sit just above the floor's own row, never needing to include it.
 pub fn exitSpan(side: Side) TileSpan {
     const mid_x = GRID_W / 2;
     const half = EXIT_SPAN / 2;
     return switch (side) {
         .up => .{ .tx0 = mid_x - half, .tx1 = mid_x + half, .ty0 = 0, .ty1 = 0 },
         .down => .{ .tx0 = mid_x - half, .tx1 = mid_x + half, .ty0 = GRID_H - 1, .ty1 = GRID_H - 1 },
-        .left => .{ .tx0 = 0, .tx1 = 0, .ty0 = FLOOR_ROW - EXIT_SPAN + 1, .ty1 = FLOOR_ROW },
-        .right => .{ .tx0 = GRID_W - 1, .tx1 = GRID_W - 1, .ty0 = FLOOR_ROW - EXIT_SPAN + 1, .ty1 = FLOOR_ROW },
+        .left => .{ .tx0 = 0, .tx1 = 0, .ty0 = FLOOR_ROW - EXIT_SPAN, .ty1 = FLOOR_ROW - 1 },
+        .right => .{ .tx0 = GRID_W - 1, .tx1 = GRID_W - 1, .ty0 = FLOOR_ROW - EXIT_SPAN, .ty1 = FLOOR_ROW - 1 },
     };
 }
 

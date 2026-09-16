@@ -37,15 +37,24 @@ pub fn generate(room: *types.Room, rng: *rng_mod.Rng) void {
     }
 }
 
-// A random empty tile with solid ground beneath it -- valid standing room
-// for a spawn. Falls back to a fixed spot if no candidate turns up.
+// A random empty tile with solid ground beneath it, restricted to the
+// floating platforms -- the floor spans the whole room, so unrestricted sampling would land there.
 pub fn randomFloorSpot(room: *const types.Room, rng: *rng_mod.Rng) struct { tx: u32, ty: u32 } {
     var attempts: u32 = 0;
-    while (attempts < 100) : (attempts += 1) {
+    while (attempts < 300) : (attempts += 1) {
         const tx = rng.between(1, types.GRID_W - 2);
-        const ty = rng.between(1, types.GRID_H - 3);
+        const ty = rng.between(1, types.FLOOR_ROW - 2);
         if (room.tiles[ty][tx] == .empty and room.tiles[ty + 1][tx] != .empty) {
             return .{ .tx = tx, .ty = ty };
+        }
+    }
+    var ty: u32 = 1;
+    while (ty < types.FLOOR_ROW - 1) : (ty += 1) {
+        var tx: u32 = 1;
+        while (tx < types.GRID_W - 1) : (tx += 1) {
+            if (room.tiles[ty][tx] == .empty and room.tiles[ty + 1][tx] != .empty) {
+                return .{ .tx = tx, .ty = ty };
+            }
         }
     }
     return .{ .tx = 2, .ty = types.GRID_H - 3 };
@@ -102,5 +111,20 @@ test "randomFloorSpot always returns a tile with solid ground beneath it" {
         const spot = randomFloorSpot(&room, &rng);
         try testing.expect(room.tiles[spot.ty][spot.tx] == .empty);
         try testing.expect(room.tiles[spot.ty + 1][spot.tx] != .empty);
+    }
+}
+
+test "randomFloorSpot never lands on the main floor -- only the floating platforms" {
+    const testing = @import("std").testing;
+    var seed: u32 = 0;
+    while (seed < 30) : (seed += 1) {
+        var room: types.Room = .{};
+        var rng = rng_mod.Rng{ .state = seed };
+        generate(&room, &rng);
+        var i: u32 = 0;
+        while (i < 10) : (i += 1) {
+            const spot = randomFloorSpot(&room, &rng);
+            try testing.expect(spot.ty < types.FLOOR_ROW - 1);
+        }
     }
 }

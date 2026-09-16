@@ -49,7 +49,9 @@ pub fn draw() void {
             switch (tile) {
                 .empty => unreachable,
                 .ground => {
-                    w4.DRAW_COLORS.* = 0x0030; // color2 = palette[2]
+                    // Same red as .wall: the floor sits flush against the
+                    // border wall, and a second color there read as a fake floor floating above the real one.
+                    w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3]
                     GROUND_VARIANTS[variantIndex(tx, ty, GROUND_VARIANTS.len)].draw(x, y, false);
                 },
                 .wall => {
