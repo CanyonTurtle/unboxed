@@ -65,9 +65,11 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 
 ## How to play
 
-**Arrow keys** move, **X** jumps (and double-jumps, once unlocked). Walk into a pot to break it --
-it may reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one from
-above to defeat it, or touch it from the side and it hits back.
+**Arrow keys** move, **X** jumps (and double-jumps, once unlocked). Jumping into a wall and holding
+toward it slides you down slowly instead of falling -- press **X** again to wall-jump off it, up
+and away, with a fresh double-jump still available afterward. Walk into a pot to break it -- it may
+reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one from above to
+defeat it, or touch it from the side and it hits back.
 
 Once every enemy in a room is down, its powerup is revealed and its 4 walls become diggable: walk
 into one and hold the direction toward it (**up**/**down** for the top/bottom walls) to charge

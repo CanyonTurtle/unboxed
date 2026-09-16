@@ -26,6 +26,9 @@ pub const Character = struct {
     // to 0 the instant on_ground goes true (character.sim.update).
     has_double_jump: bool = false,
     air_jumps_used: u8 = 0,
+    // Which side a wall is on while airborne and pressing into it (-1 left,
+    // 0 none, 1 right) -- drives wall-slide and wall-jump (character.sim).
+    wall_side: i8 = 0,
 
     pub fn aabb(self: Character) collision.Rect {
         return .{ .x = self.x, .y = self.y, .w = WIDTH, .h = HEIGHT };

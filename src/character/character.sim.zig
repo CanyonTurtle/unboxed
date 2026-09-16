@@ -12,15 +12,18 @@ const types = @import("character.types.zig");
 const MOVE_ACCEL: f32 = 0.4;
 const MOVE_MAX_SPEED: f32 = 1.6;
 const FRICTION: f32 = 0.8;
-const JUMP_VELOCITY: f32 = -3.6;
+const JUMP_VELOCITY: f32 = -4.2;
+const WALL_JUMP_PUSH: f32 = 2.0;
 const INVULN_FRAMES: u16 = 45;
 const DAMAGE_KNOCKBACK: f32 = 2.0;
 
 pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
-    if (input.held(gamepad, w4.BUTTON_LEFT)) {
+    const moving_left = input.held(gamepad, w4.BUTTON_LEFT);
+    const moving_right = input.held(gamepad, w4.BUTTON_RIGHT);
+    if (moving_left) {
         self.vel_x -= MOVE_ACCEL;
         self.facing_right = false;
-    } else if (input.held(gamepad, w4.BUTTON_RIGHT)) {
+    } else if (moving_right) {
         self.vel_x += MOVE_ACCEL;
         self.facing_right = true;
     } else {
@@ -30,12 +33,21 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
 
     if (self.on_ground) self.air_jumps_used = 0;
     gravity.apply(&self.vel_y, self.on_ground);
+    // Clinging to a wall slows a fall to a controlled slide, same idea as
+    // on_ground gating gravity.apply above -- capped, never sped up.
+    if (self.wall_side != 0 and self.vel_y > 0) gravity.applyWallSlide(&self.vel_y);
 
     // Applied after gravity so a jump always snaps to exactly JUMP_VELOCITY
-    // this frame, whether it's the on-ground jump or a double-jump.
+    // this frame, whether it's the ground jump, a wall jump, or a double-jump.
     if (input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
         if (self.on_ground) {
             self.vel_y = JUMP_VELOCITY;
+        } else if (self.wall_side != 0) {
+            self.vel_y = JUMP_VELOCITY;
+            self.vel_x = -@as(f32, @floatFromInt(self.wall_side)) * WALL_JUMP_PUSH;
+            self.facing_right = self.wall_side < 0;
+            self.wall_side = 0;
+            self.air_jumps_used = 0; // a fresh double-jump is still earned after this
         } else if (self.has_double_jump and self.air_jumps_used < 1) {
             self.vel_y = JUMP_VELOCITY;
             self.air_jumps_used += 1;
@@ -45,6 +57,13 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     const tiles = collision.TileQuery{ .tile_size = room_types.TILE_SIZE, .isSolid = &room_types.isSolid };
     const result = collision.moveAndCollide(&self.x, &self.y, types.WIDTH, types.HEIGHT, &self.vel_x, &self.vel_y, tiles);
     self.on_ground = result.on_ground;
+
+    // Only "clinging" while airborne and still pressing into the wall that
+    // stopped you -- brushing past one on the ground doesn't count.
+    self.wall_side = if (!self.on_ground and result.hit_wall and (moving_left or moving_right))
+        (if (moving_left) @as(i8, -1) else 1)
+    else
+        0;
 
     if (self.invuln_timer > 0) self.invuln_timer -= 1;
 }
@@ -74,11 +93,11 @@ test "update only allows a jump while on_ground" {
     room_types.active = .{};
     var c = types.Character{ .x = 32, .y = 80, .on_ground = false };
     update(&c, w4.BUTTON_1, 0);
-    try testing.expect(c.vel_y != -3.6);
+    try testing.expect(c.vel_y != JUMP_VELOCITY);
 
     c = types.Character{ .x = 32, .y = 80, .on_ground = true };
     update(&c, w4.BUTTON_1, 0);
-    try testing.expectEqual(@as(f32, -3.6), c.vel_y);
+    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
 }
 
 test "takeDamage reduces hp, applies knockback, and starts invulnerability" {
@@ -99,18 +118,18 @@ test "has_double_jump grants exactly one extra jump while airborne" {
     room_types.active = .{};
     var c = types.Character{ .x = 32, .y = 40, .on_ground = false, .has_double_jump = true };
     update(&c, w4.BUTTON_1, 0); // first air jump
-    try testing.expectEqual(@as(f32, -3.6), c.vel_y);
+    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
 
     c.vel_y = 1; // pretend gravity has been pulling it back down since
     update(&c, w4.BUTTON_1, 0); // second press -- no jumps left
-    try testing.expect(c.vel_y != -3.6); // gravity's own nudge, not a fresh jump
+    try testing.expect(c.vel_y != JUMP_VELOCITY); // gravity's own nudge, not a fresh jump
 }
 
 test "without has_double_jump, an air jump press does nothing" {
     room_types.active = .{};
     var c = types.Character{ .x = 32, .y = 40, .on_ground = false, .has_double_jump = false };
     update(&c, w4.BUTTON_1, 0);
-    try testing.expect(c.vel_y != -3.6);
+    try testing.expect(c.vel_y != JUMP_VELOCITY);
 }
 
 test "landing resets air_jumps_used so the next fall grants a fresh double jump" {
@@ -118,4 +137,34 @@ test "landing resets air_jumps_used so the next fall grants a fresh double jump"
     var c = types.Character{ .has_double_jump = true, .air_jumps_used = 1, .on_ground = true };
     update(&c, 0, 0);
     try testing.expectEqual(@as(u8, 0), c.air_jumps_used);
+}
+
+test "pressing into a wall while airborne registers wall_side and slides slower" {
+    room_types.active = .{};
+    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall; // a wall just to the right
+    var c = types.Character{ .x = 42, .y = 40, .on_ground = false, .vel_y = 10 };
+    update(&c, w4.BUTTON_RIGHT, 0); // first contact this frame -- registers wall_side
+    try testing.expectEqual(@as(i8, 1), c.wall_side);
+
+    update(&c, w4.BUTTON_RIGHT, 0); // now clinging -- gravity gets capped to the slide speed
+    try testing.expectEqual(gravity.WALL_SLIDE_SPEED, c.vel_y);
+}
+
+test "jumping while clinging to a wall kicks off it and away" {
+    room_types.active = .{};
+    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall;
+    var c = types.Character{ .x = 42, .y = 40, .on_ground = false, .wall_side = 1 };
+    update(&c, w4.BUTTON_1, 0);
+
+    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
+    try testing.expect(c.vel_x < 0); // wall was on the right -> kicked left
+    try testing.expect(!c.facing_right); // now facing the direction it's kicking off toward
+    try testing.expectEqual(@as(i8, 0), c.wall_side);
+}
+
+test "wall_side clears the instant the character lands" {
+    room_types.active = .{};
+    var c = types.Character{ .wall_side = 1, .on_ground = true, .vel_y = 0 };
+    update(&c, w4.BUTTON_RIGHT, 0);
+    try testing.expectEqual(@as(i8, 0), c.wall_side);
 }
