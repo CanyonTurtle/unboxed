@@ -12,6 +12,9 @@ const item_types = @import("../item/item.types.zig");
 const item_render = @import("../item/item.render.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const enemy_render = @import("../enemy/enemy.render.zig");
+const powerup_types = @import("../powerup/powerup.types.zig");
+const powerup_render = @import("../powerup/powerup.render.zig");
+const map_types = @import("../map/map.types.zig");
 const state = @import("game.types.zig");
 
 pub fn draw() void {
@@ -19,6 +22,7 @@ pub fn draw() void {
     for (pot_types.pots) |pot| pot_render.draw(pot);
     for (item_types.items) |item| item_render.draw(item);
     for (enemy_types.enemies) |enemy| enemy_render.draw(enemy);
+    powerup_render.draw(powerup_types.active);
     char_render.draw(char_types.player);
     drawHud();
     if (state.game.game_over) drawGameOver();
@@ -26,8 +30,14 @@ pub fn draw() void {
 
 fn drawHud() void {
     w4.DRAW_COLORS.* = 0x0004;
-    var buf: [24]u8 = undefined;
-    const line = std.fmt.bufPrint(&buf, "HP {d}  GOLD {d}", .{ char_types.player.hp, char_types.player.score }) catch return;
+    var buf: [32]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "HP{d}/{d} G{d} R{d}.{d}", .{
+        char_types.player.hp,
+        char_types.player.max_hp,
+        char_types.player.score,
+        map_types.current_rx,
+        map_types.current_ry,
+    }) catch return;
     w4.Text(line, 2, 2);
 }
 

@@ -323,6 +323,8 @@ async function loadCart(wasmPath) {
     isGameOver: () => e.debugIsGameOver() !== 0,
     getPlayerX: () => e.debugGetPlayerX(),
     getPlayerY: () => e.debugGetPlayerY(),
+    getRoomX: () => e.debugGetRoomX(),
+    getRoomY: () => e.debugGetRoomY(),
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

@@ -41,8 +41,9 @@ if a file would blow the 500-line limit below, that's a sign the concept
 itself should split into two folders, not that one file should become two.
 
 Current concepts, as a reference: `character`, `pot`, `item`, `enemy`,
-`room` (the tile grid + procedural generation), and `game` (the orchestrator
-tying every other concept together -- see below).
+`powerup` (a permanent player upgrade), `room` (one screen's tile grid +
+procedural generation), `map` (the room graph -- see below), and `game`
+(the orchestrator tying every other concept together -- see below).
 
 ### `core/` -- shared behavior, not shared entities
 
@@ -101,6 +102,24 @@ Sprites are defined as top-level `const` ASCII art right in the
 Terrain (`room.render.zig`) is flat-colored rects instead -- it has no
 silhouette worth a sprite asset.
 
+## `map/`: the one locality allowed to know every entity's shape
+
+The room graph (`map.types.RoomSave`) persists a room's tiles *and* its
+pots/items/enemies/powerup, so leaving and returning preserves state -- that
+means `map.types.zig` necessarily imports every persisted entity's
+`.types.zig` just to declare storage for it. This is the one deliberate
+exception to "entities don't know about each other": **if you add a new
+entity kind that should survive a room transition, also add a field for it
+to `RoomSave` and a line each to `map.sim.zig`'s `saveActive`/`loadActive`.**
+Forgetting this doesn't break the build -- it just silently resets that
+entity every time the player changes rooms, so don't forget it.
+
+`map.sim.zig` also owns a second per-frame entry point, `update(gamepad,
+player)`, parallel to `game.sim.update` -- it handles room transitions and
+wall-digging, the two things that need the room graph rather than just the
+active room. `game.sim.zig` calls it once per frame alongside the per-entity
+loops it already owns.
+
 ## State: `pub var`, one per locality
 
 Each locality owns its own live data as a `pub var` in `.types.zig`
@@ -128,6 +147,9 @@ position/behavior/sprite): copy the shape of the simplest existing entity
    `update` that calls `<name>_sim.update` and handles its `Event`.
 3. In `game.render.zig`: add one `for` loop calling `<name>_render.draw`.
 4. Add `<name>/<name>.sim.zig` to `src/tests.zig`.
+5. If it should persist across room transitions (almost everything should),
+   add it to `map.types.RoomSave` and `map.sim.zig`'s save/load (see "`map/`"
+   below) -- otherwise it silently resets every time the player changes rooms.
 
 No existing file needs restructuring -- every step is additive.
 
@@ -141,14 +163,24 @@ kind's `.sim.zig` (the effect) and `.render.zig` (the sprite). See
 entity kinds will want it; otherwise start it in the one locality that
 needs it and promote it later (see "core/" above).
 
-**Growing the room beyond one screen**: today's `room` is a single static
-160x160 screen (see `room.types.zig`'s header comment) -- there's no
-camera. A scrolling/multi-room map is a `room.types.zig`/`room.sim.zig`
-change (the grid becomes bigger than the screen, plus a generation
-strategy for connecting rooms) and a new `core.camera.zig` (viewport
-offset, applied by every `*.render.zig`'s draw coordinates) -- not a
-rewrite of any entity's sim code, since `core.collision` already takes tile
-coordinates, not screen coordinates.
+**The room graph today**: `map.types.zig` lays out a fixed `MAP_W x MAP_H`
+grid of rooms (see its header). Each room is still exactly one 160x160
+screen with no camera -- moving to a neighbor is an instant room swap
+(`map.sim.enterRoom`), not a scrolling transition. A wall between two rooms
+opens once its room is cleared and a player digs into it long enough (see
+`map.sim.updateDigging`/`toughnessFor`); the reward waiting past a wall
+scales with that room's `map.types.depth`.
+
+**Adding real camera scrolling** (rooms rendered mid-slide into each other)
+would layer on top of this without changing the room graph: a
+`core.camera.zig` holding a viewport offset, applied by every
+`*.render.zig`'s draw coordinates, plus `map.sim` driving the offset during
+a transition instead of snapping. `core.collision` already only deals in
+tile coordinates, not screen ones, so entity sim code wouldn't need to change.
+
+**Growing the map's size**: bump `MAP_W`/`MAP_H` in `map.types.zig`. Each
+room costs ~1.3KB of the cart's fixed 64KB memory (see the comment on
+`map.types.rooms`) -- keep an eye on total size as the map grows.
 
 ## House style
 
@@ -188,9 +220,13 @@ a commit's run status.
 ## What's actually implemented here
 
 This is a **prototype of the pattern**, not the game itself: one character
-(move/jump/gravity/collision), one pot (breaks on contact), two item kinds
-(coin/heart), one enemy kind (patrols, stomp to defeat or it hits back),
-and one procedurally-generated single-screen room. The goal was a scalable
-skeleton with a couple of moving, testable, visibly-working pieces --
-fleshing out real content (more enemies, items, room variety, actual
-"battle" depth) is exactly what the recipes above are for.
+(move/jump/double-jump/gravity/collision), one pot (breaks on contact), two
+item kinds (coin/heart) and two powerup kinds (extra_hp/double_jump, one per
+room, revealed once its enemies are cleared), one enemy kind (patrols, stomp
+to defeat or it hits back), and a small graph of procedurally-generated
+rooms connected by diggable walls. Each room's 5x5 terrain tiles come in a
+small rotation of ASCII-art variants (`room.render.zig`) for texture. The
+goal was a scalable skeleton with a couple of moving, testable,
+visibly-working pieces -- fleshing out real content (more enemies, items,
+powerups, room variety, actual "battle" depth, a bigger map) is exactly
+what the recipes above are for.

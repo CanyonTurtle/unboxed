@@ -1,8 +1,9 @@
 # unboxed
 
 A procedurally-generated roguelike-platformer for the [WASM-4](https://wasm4.org) fantasy console,
-written in Zig. Move, jump, break pots, collect items, and fight enemies in a freshly-generated
-room every run.
+written in Zig. Move, jump, break pots, collect items, and clear rooms of enemies to dig through
+their walls into a small connected map of freshly-generated rooms, picking up permanent powerups
+along the way.
 
 This repo is also a from-scratch reboot of an earlier platformer's architecture -- see
 [CLAUDE.md](CLAUDE.md) for the organizing ideas (locality-based folders, assets defined in code,
@@ -64,10 +65,14 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 
 ## How to play
 
-**Arrow keys** move and (up on WASM-4's default binding, or **X**) jump. Walk into a pot to break
-it -- it may reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one
-from above to defeat it, or touch it from the side and it hits back. Losing all your HP ends the
-run; press **X** to start a fresh, freshly-generated room.
+**Arrow keys** move, **X** jumps (and double-jumps, once unlocked). Walk into a pot to break it --
+it may reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one from
+above to defeat it, or touch it from the side and it hits back.
+
+Once every enemy in a room is down, its powerup is revealed and its 4 walls become diggable: walk
+into one and hold the direction toward it (**up**/**down** for the top/bottom walls) to charge
+through. Walls guarding a room further from the start take longer to dig through, but that room's
+reward is better for it. Losing all your HP ends the run; press **X** to start a fresh map.
 
 ## Project layout
 
@@ -79,12 +84,14 @@ full rationale and the recipe for adding a new one.
   sprites, defined in code instead of imported images), `core.collision` (AABB overlap + tile
   collision), `core.gravity`, `core.input` (gamepad edge detection), `core.rng` (deterministic
   xorshift32, used for procedural generation).
-- **`character/`, `pot/`, `item/`, `enemy/`**: one entity kind each, split into `.types.zig`
-  (data), `.sim.zig` (logic + tests), `.render.zig` (drawing).
-- **`room/`**: the single-screen tile grid and its procedural generation.
+- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`**: one entity kind each, split into
+  `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing).
+- **`room/`**: one screen's 32x32 tile grid, its procedural generation, and its 4 diggable sides.
+- **`map/`**: the room graph -- generates rooms on demand, saves/restores each one's state on a
+  transition, and drives wall-digging (see CLAUDE.md's `map/` section).
 - **`game/`**: the orchestrator -- `game.sim.zig` advances every entity and reacts to the events
-  they report (a broken pot reveals an item, a collected coin adds score, ...); `game.render.zig`
-  draws everything in order plus the HUD.
+  they report (a broken pot reveals an item, a collected coin adds score, a collected powerup
+  permanently upgrades the player, ...); `game.render.zig` draws everything in order plus the HUD.
 - **Entry point & support**: `main.zig` (wires WASM-4's `start`/`update` to `game.sim`/
   `game.render`), `wasm4.zig` (host API bindings), `debug.zig` (debug-build-only accessors for the
   test harness), `tests.zig` (the native test entry point).

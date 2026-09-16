@@ -1,11 +1,30 @@
-// Draws the active room's tile grid as flat-colored rects, one fill color
-// per TileId -- terrain has no silhouette worth an ASCII-art sprite asset.
+// Draws the active room's tile grid. Each solid TileId has a small rotation
+// of 5x5 ASCII-art variants (core.sprite.fromArt), picked per tile position.
 
 const w4 = @import("../wasm4.zig");
+const sprite_mod = @import("../core/core.sprite.zig");
 const types = @import("room.types.zig");
 
 const TILE_PX: i32 = @intFromFloat(types.TILE_SIZE);
-const TILE_PX_U: u32 = @intFromFloat(types.TILE_SIZE);
+
+const GROUND_VARIANTS = [_]sprite_mod.Sprite{
+    sprite_mod.fromArt(&.{ "#####", "#####", "##.##", "#####", "#####" }),
+    sprite_mod.fromArt(&.{ "#####", "##.##", "#####", "##.##", "#####" }),
+    sprite_mod.fromArt(&.{ "#####", "#.#.#", "#####", "#.#.#", "#####" }),
+};
+
+const WALL_VARIANTS = [_]sprite_mod.Sprite{
+    sprite_mod.fromArt(&.{ "#####", "#####", "#####", "#####", "#####" }),
+    sprite_mod.fromArt(&.{ "#####", "##.##", "#####", "##.##", "#####" }),
+};
+
+// A cheap position hash (not a real PRNG) -- deterministic per tile so the
+// pattern never flickers frame to frame, with no need to store a variant.
+fn variantIndex(tx: usize, ty: usize, count: u32) u32 {
+    var h: u32 = @as(u32, @intCast(tx)) *% 374761393 +% @as(u32, @intCast(ty)) *% 668265263;
+    h = (h ^ (h >> 13)) *% 1274126177;
+    return (h ^ (h >> 16)) % count;
+}
 
 pub fn draw() void {
     const room = &types.active;
@@ -13,12 +32,21 @@ pub fn draw() void {
         for (0..types.GRID_W) |tx| {
             const tile = room.tiles[ty][tx];
             if (tile == .empty) continue;
-            w4.DRAW_COLORS.* = switch (tile) {
+            if (tile == .wall and types.isOpenExitTile(@intCast(tx), @intCast(ty))) continue;
+
+            const x = @as(i32, @intCast(tx)) * TILE_PX;
+            const y = @as(i32, @intCast(ty)) * TILE_PX;
+            switch (tile) {
                 .empty => unreachable,
-                .ground => 0x0003, // solid color3
-                .wall => 0x0004, // solid color4
-            };
-            w4.Rect(@as(i32, @intCast(tx)) * TILE_PX, @as(i32, @intCast(ty)) * TILE_PX, TILE_PX_U, TILE_PX_U);
+                .ground => {
+                    w4.DRAW_COLORS.* = 0x0030; // color2 = palette[2]
+                    GROUND_VARIANTS[variantIndex(tx, ty, GROUND_VARIANTS.len)].draw(x, y, false);
+                },
+                .wall => {
+                    w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3]
+                    WALL_VARIANTS[variantIndex(tx, ty, WALL_VARIANTS.len)].draw(x, y, false);
+                },
+            }
         }
     }
 }

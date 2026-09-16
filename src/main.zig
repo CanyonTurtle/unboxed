@@ -16,6 +16,8 @@ comptime {
         @export(&debug.isGameOver, .{ .name = "debugIsGameOver" });
         @export(&debug.getPlayerX, .{ .name = "debugGetPlayerX" });
         @export(&debug.getPlayerY, .{ .name = "debugGetPlayerY" });
+        @export(&debug.getRoomX, .{ .name = "debugGetRoomX" });
+        @export(&debug.getRoomY, .{ .name = "debugGetRoomY" });
     }
 }
 

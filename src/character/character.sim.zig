@@ -28,11 +28,19 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     }
     self.vel_x = std.math.clamp(self.vel_x, -MOVE_MAX_SPEED, MOVE_MAX_SPEED);
 
-    if (self.on_ground and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
-        self.vel_y = JUMP_VELOCITY;
-    }
-
+    if (self.on_ground) self.air_jumps_used = 0;
     gravity.apply(&self.vel_y, self.on_ground);
+
+    // Applied after gravity so a jump always snaps to exactly JUMP_VELOCITY
+    // this frame, whether it's the on-ground jump or a double-jump.
+    if (input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
+        if (self.on_ground) {
+            self.vel_y = JUMP_VELOCITY;
+        } else if (self.has_double_jump and self.air_jumps_used < 1) {
+            self.vel_y = JUMP_VELOCITY;
+            self.air_jumps_used += 1;
+        }
+    }
 
     const tiles = collision.TileQuery{ .tile_size = room_types.TILE_SIZE, .isSolid = &room_types.isSolid };
     const result = collision.moveAndCollide(&self.x, &self.y, types.WIDTH, types.HEIGHT, &self.vel_x, &self.vel_y, tiles);
@@ -74,15 +82,40 @@ test "update only allows a jump while on_ground" {
 }
 
 test "takeDamage reduces hp, applies knockback, and starts invulnerability" {
-    var c = types.Character{ .x = 20, .hp = types.MAX_HP };
+    var c = types.Character{ .x = 20, .hp = types.BASE_MAX_HP };
     takeDamage(&c, 1, 30); // hazard to the right -> knocked left
-    try testing.expectEqual(types.MAX_HP - 1, c.hp);
+    try testing.expectEqual(types.BASE_MAX_HP - 1, c.hp);
     try testing.expect(c.vel_x < 0);
     try testing.expect(c.invuln_timer > 0);
 }
 
 test "takeDamage is a no-op while invulnerable" {
-    var c = types.Character{ .hp = types.MAX_HP, .invuln_timer = 10 };
+    var c = types.Character{ .hp = types.BASE_MAX_HP, .invuln_timer = 10 };
     takeDamage(&c, 1, 0);
-    try testing.expectEqual(types.MAX_HP, c.hp);
+    try testing.expectEqual(types.BASE_MAX_HP, c.hp);
+}
+
+test "has_double_jump grants exactly one extra jump while airborne" {
+    room_types.active = .{};
+    var c = types.Character{ .x = 32, .y = 40, .on_ground = false, .has_double_jump = true };
+    update(&c, w4.BUTTON_1, 0); // first air jump
+    try testing.expectEqual(@as(f32, -3.6), c.vel_y);
+
+    c.vel_y = 1; // pretend gravity has been pulling it back down since
+    update(&c, w4.BUTTON_1, 0); // second press -- no jumps left
+    try testing.expect(c.vel_y != -3.6); // gravity's own nudge, not a fresh jump
+}
+
+test "without has_double_jump, an air jump press does nothing" {
+    room_types.active = .{};
+    var c = types.Character{ .x = 32, .y = 40, .on_ground = false, .has_double_jump = false };
+    update(&c, w4.BUTTON_1, 0);
+    try testing.expect(c.vel_y != -3.6);
+}
+
+test "landing resets air_jumps_used so the next fall grants a fresh double jump" {
+    room_types.active = .{};
+    var c = types.Character{ .has_double_jump = true, .air_jumps_used = 1, .on_ground = true };
+    update(&c, 0, 0);
+    try testing.expectEqual(@as(u8, 0), c.air_jumps_used);
 }

@@ -38,18 +38,22 @@ const testing = @import("std").testing;
 
 test "update patrols horizontally and turns around at a wall" {
     room_types.active = .{};
-    for (0..room_types.GRID_W) |tx| room_types.active.tiles[6][tx] = .ground; // a floor to land on
-    room_types.active.tiles[5][8] = .wall; // a wall standing on that floor, ahead of the enemy
-    var enemy = types.Enemy{ .x = 40, .y = 32, .alive = true, .facing_right = true };
+    room_types.active_open_sides = [_]bool{false} ** 4;
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground; // a floor to land on
+    room_types.active.tiles[9][12] = .wall; // a wall standing on that floor, ahead of the enemy
+    var enemy = types.Enemy{ .x = 40, .y = 42, .alive = true, .facing_right = true };
     const far_away = collision.Rect{ .x = 200, .y = 200, .w = 1, .h = 1 };
+    var ever_turned = false;
     var i: u32 = 0;
-    while (i < 100) : (i += 1) {
+    while (i < 150) : (i += 1) {
         _ = update(&enemy, far_away, 0);
         // Never tunnels past the wall, no matter when it lands and reaches it.
-        try testing.expect(enemy.x <= 8 * 8);
+        try testing.expect(enemy.x <= 12 * 5 - types.WIDTH);
+        if (!enemy.facing_right) ever_turned = true;
     }
-    // And it did in fact turn back after meeting the wall.
-    try testing.expect(!enemy.facing_right);
+    // Checked as "ever", not "still" -- it also bounces off the room's
+    // unbounded left edge, so it can be walking right again by the end.
+    try testing.expect(ever_turned);
 }
 
 test "update is a no-op for a dead enemy" {
