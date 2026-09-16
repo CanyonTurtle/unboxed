@@ -2,6 +2,7 @@
 // of damped-spring-connected point masses ending at the plank, itself one more point.
 
 const collision = @import("../core/core.collision.zig");
+const room_types = @import("../room/room.types.zig");
 const types = @import("platform.types.zig");
 
 const SPRING_K: f32 = 0.1;
@@ -9,8 +10,12 @@ const DAMPING: f32 = 0.85;
 const GRAVITY: f32 = 0.12;
 const SEGMENT_MASS: f32 = 1.0;
 const BODY_MASS: f32 = 2.5;
-const RIDER_WEIGHT: f32 = 3.0; // extra downward accel on the plank while ridden
+const RIDER_WEIGHT: f32 = 0.5; // extra downward accel on the plank while ridden
 const RIDE_TOLERANCE: f32 = 6; // px of slack allowed between feet and the plank's last-known top
+
+// A hard floor for the plank's sag, independent of tuning -- ride results
+// move the player without tile collision, so oversag could drag them into the real floor.
+const MAX_BODY_Y: f32 = @as(f32, @floatFromInt(room_types.FLOOR_ROW)) * room_types.TILE_SIZE - types.HEIGHT / 2 - 4;
 
 // Places a fresh platform: anchors `WIDTH` apart at `anchor_y`, hanging
 // `hang_len` px down to the plank, segments laid out straight as a start.
@@ -71,6 +76,11 @@ fn stepBody(self: *types.SwingPlatform, extra_weight: f32) void {
     const l = springForce(self.body.x - half_w, self.body.y, self.left[types.SEGMENTS - 1].x, self.left[types.SEGMENTS - 1].y, self.rest_len);
     const r = springForce(self.body.x + half_w, self.body.y, self.right[types.SEGMENTS - 1].x, self.right[types.SEGMENTS - 1].y, self.rest_len);
     stepPoint(&self.body, .{ .fx = l.fx + r.fx, .fy = l.fy + r.fy }, BODY_MASS, extra_weight);
+
+    if (self.body.y > MAX_BODY_Y) {
+        self.body.y = MAX_BODY_Y;
+        self.body.vel_y = @min(self.body.vel_y, 0);
+    }
 }
 
 // Advances the platform one frame and reports whether the player (a plain
@@ -139,6 +149,19 @@ test "update does not report riding when the player is far from the plank" {
     const result = update(&p, far_away, 0);
 
     try testing.expect(!result.riding);
+}
+
+test "a long-hanging, sustained-ridden platform never sags into the room's floor" {
+    var p: types.SwingPlatform = .{};
+    spawn(&p, 20, 10, 100); // the longest hang map.sim ever generates
+
+    var i: u32 = 0;
+    while (i < 600) : (i += 1) {
+        const rider_box = collision.Rect{ .x = p.body.x - 2, .y = p.body.y - types.HEIGHT / 2 - 8, .w = 8, .h = 8 };
+        _ = update(&p, rider_box, 0);
+    }
+
+    try testing.expect(p.body.y <= MAX_BODY_Y);
 }
 
 test "a ridden platform sags lower than an unridden one after the same time" {

@@ -202,3 +202,29 @@ test "riding a swinging platform holds the player up instead of falling through"
     const expected_y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT;
     try testing.expect(@abs(char_types.player.y - expected_y) < 3);
 }
+
+test "leaving a platform after riding falls normally onto the real floor" {
+    newRun();
+    clearField();
+    // Strip the room's own random clutter platforms so only the true floor
+    // and our injected swing are in play -- keeps this test deterministic.
+    for (1..room_types.GRID_H - 1) |ty| {
+        if (ty == room_types.FLOOR_ROW) continue;
+        for (1..room_types.GRID_W - 1) |tx| room_types.active.tiles[ty][tx] = .empty;
+    }
+
+    const plat = &platform_types.platforms[0];
+    platform_sim.spawn(plat, 40, 10, 100); // longest hang map.sim generates, sustained riding stresses the sag clamp
+    char_types.player = .{ .x = plat.body.x, .y = plat.body.y - platform_types.HEIGHT / 2 - char_types.HEIGHT };
+
+    var i: u32 = 0;
+    while (i < 300) : (i += 1) update(0); // ride it a long while, sagging toward the clamp
+
+    char_types.player.x = 5; // step off, away from the plank
+    i = 0;
+    while (i < 200) : (i += 1) update(0);
+
+    try testing.expect(char_types.player.on_ground);
+    const floor_y = @as(f32, @floatFromInt(room_types.FLOOR_ROW)) * room_types.TILE_SIZE - char_types.HEIGHT;
+    try testing.expectEqual(floor_y, char_types.player.y);
+}
