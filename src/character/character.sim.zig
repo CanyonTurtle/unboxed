@@ -43,14 +43,13 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     }
     self.vel_x = std.math.clamp(self.vel_x, -MOVE_MAX_SPEED, MOVE_MAX_SPEED);
 
-    if (self.on_ground) self.air_jumps_used = 0;
     gravity.apply(&self.vel_y, self.on_ground);
     // Clinging to a wall slows a fall to a controlled slide, same idea as
     // on_ground gating gravity.apply above -- capped, never sped up.
     if (self.wall_side != 0 and self.vel_y > 0) gravity.applyWallSlide(&self.vel_y);
 
-    // Applied after gravity so a jump always snaps to exactly JUMP_VELOCITY
-    // this frame, whether it's the ground jump, a wall jump, or a double-jump.
+    // One button, three meanings: a ground jump, a wall jump when clinging,
+    // or -- the fallback for any other airborne press -- the swirl attack.
     if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
         if (self.on_ground) {
             self.vel_y = JUMP_VELOCITY;
@@ -59,10 +58,8 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
             self.vel_x = -@as(f32, @floatFromInt(self.wall_side)) * WALL_JUMP_PUSH;
             self.facing_right = self.wall_side < 0;
             self.wall_side = 0;
-            self.air_jumps_used = 0; // a fresh double-jump is still earned after this
-        } else if (self.has_double_jump and self.air_jumps_used < 1) {
-            self.vel_y = JUMP_VELOCITY;
-            self.air_jumps_used += 1;
+        } else {
+            self.swing_timer = types.SWING_FRAMES;
         }
     }
 
@@ -79,11 +76,6 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     else
         0;
 
-    // Midair only -- a ground swing would be redundant with just walking
-    // into an enemy, and this is meant to reward staying airborne.
-    if (!stunned and !self.on_ground and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_2)) {
-        self.swing_timer = types.SWING_FRAMES;
-    }
     if (self.swing_timer > 0) self.swing_timer -= 1;
 
     if (self.invuln_timer > 0) self.invuln_timer -= 1;
@@ -151,31 +143,6 @@ test "takeDamage is a no-op while invulnerable" {
     try testing.expectEqual(types.BASE_MAX_HP, c.hp);
 }
 
-test "has_double_jump grants exactly one extra jump while airborne" {
-    room_types.active = .{};
-    var c = types.Character{ .x = 32, .y = 40, .on_ground = false, .has_double_jump = true };
-    update(&c, w4.BUTTON_1, 0); // first air jump
-    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
-
-    c.vel_y = 1; // pretend gravity has been pulling it back down since
-    update(&c, w4.BUTTON_1, 0); // second press -- no jumps left
-    try testing.expect(c.vel_y != JUMP_VELOCITY); // gravity's own nudge, not a fresh jump
-}
-
-test "without has_double_jump, an air jump press does nothing" {
-    room_types.active = .{};
-    var c = types.Character{ .x = 32, .y = 40, .on_ground = false, .has_double_jump = false };
-    update(&c, w4.BUTTON_1, 0);
-    try testing.expect(c.vel_y != JUMP_VELOCITY);
-}
-
-test "landing resets air_jumps_used so the next fall grants a fresh double jump" {
-    room_types.active = .{};
-    var c = types.Character{ .has_double_jump = true, .air_jumps_used = 1, .on_ground = true };
-    update(&c, 0, 0);
-    try testing.expectEqual(@as(u8, 0), c.air_jumps_used);
-}
-
 test "pressing into a wall while airborne registers wall_side and slides slower" {
     room_types.active = .{};
     for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall; // a wall just to the right
@@ -221,15 +188,25 @@ test "the squash timer counts down and does not retrigger while already grounded
     try testing.expectEqual(@as(u8, 1), c.squash_timer);
 }
 
-test "BUTTON_2 starts a sword swing while airborne, never while grounded" {
+test "the jump button starts a swirl attack in the air, but still just jumps on the ground" {
     room_types.active = .{};
     var airborne = types.Character{ .x = 32, .y = 40, .on_ground = false };
-    update(&airborne, w4.BUTTON_2, 0);
+    update(&airborne, w4.BUTTON_1, 0);
     try testing.expect(airborne.swing_timer > 0);
+    try testing.expect(airborne.vel_y != JUMP_VELOCITY);
 
     room_types.active.tiles[10][6] = .ground; // a floor, so "grounded" actually stays grounded
     var grounded = types.Character{ .x = 32, .y = 40, .on_ground = true };
-    update(&grounded, w4.BUTTON_2, 0);
-    try testing.expect(grounded.on_ground);
+    update(&grounded, w4.BUTTON_1, 0);
+    try testing.expectEqual(JUMP_VELOCITY, grounded.vel_y);
     try testing.expectEqual(@as(u8, 0), grounded.swing_timer);
+}
+
+test "clinging to a wall still wall-jumps instead of swirling" {
+    room_types.active = .{};
+    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall;
+    var c = types.Character{ .x = 42, .y = 40, .on_ground = false, .wall_side = 1 };
+    update(&c, w4.BUTTON_1, 0);
+    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
+    try testing.expectEqual(@as(u8, 0), c.swing_timer);
 }

@@ -5,7 +5,7 @@ const collision = @import("../core/core.collision.zig");
 
 pub const SIZE: f32 = 8;
 
-pub const PowerupKind = enum { extra_hp, double_jump };
+pub const PowerupKind = enum { extra_hp };
 
 pub const Powerup = struct {
     x: f32 = 0,

@@ -57,7 +57,6 @@ fn generateInto(save: *map_types.RoomSave, index: u32, is_start: bool) void {
         save.powerup = .{
             .x = tilePx(spot.tx),
             .y = tilePx(spot.ty),
-            .kind = if (index >= 3) .double_jump else .extra_hp,
             .placed = true,
         };
     }

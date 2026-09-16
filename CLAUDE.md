@@ -253,11 +253,13 @@ terrain.
 ## What's actually implemented here
 
 This is a **prototype of the pattern**, not the game itself: one character
-(move/jump/double-jump/wall-jump/squash-on-land/gravity/collision/midair
-swirl attack/hit stun) with a pose per motion state (rise/peak/fall/squash,
-`character.render.zig`), one pot (breaks on contact), two item kinds
-(coin/heart) and two powerup kinds (extra_hp/double_jump, one per room,
-revealed once its enemies are cleared), three enemy kinds sharing one
+(move/jump/wall-jump/squash-on-land/gravity/collision/hit stun) with a
+pose per motion state (rise/peak/fall/squash, `character.render.zig`) and
+one attack -- a midair swirl, sharing jump's own button, that only
+triggers when airborne and not clinging to a wall (see character.sim.
+update's jump-button branch) -- one pot (breaks on contact), two item
+kinds (coin/heart) and one powerup kind (extra_hp, one per room, revealed
+once its enemies are cleared), three enemy kinds sharing one
 struct (`walker`: ground patrol, turns at walls; `creeper`: patrols
 vertically along a wall; `fly`: patrols horizontally in open air with a
 sine bob) -- the sword swirl is the *only* way to defeat one, any contact

@@ -16,17 +16,6 @@ const EXTRA_HP_SPRITE = sprite_mod.fromArt(&.{
     "........",
 });
 
-const DOUBLE_JUMP_SPRITE = sprite_mod.fromArt(&.{
-    "...##...",
-    "..####..",
-    ".######.",
-    "........",
-    "...##...",
-    "..####..",
-    ".######.",
-    "........",
-});
-
 pub fn draw(p: types.Powerup, offset_x: i32, offset_y: i32) void {
     if (!p.placed or !p.revealed or p.collected) return;
     const x: i32 = @as(i32, @intFromFloat(p.x)) + offset_x;
@@ -35,10 +24,6 @@ pub fn draw(p: types.Powerup, offset_x: i32, offset_y: i32) void {
         .extra_hp => {
             w4.DRAW_COLORS.* = 0x0030; // color2 = palette[2] (red)
             EXTRA_HP_SPRITE.draw(x, y, false);
-        },
-        .double_jump => {
-            w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3] (yellow)
-            DOUBLE_JUMP_SPRITE.draw(x, y, false);
         },
     }
 }

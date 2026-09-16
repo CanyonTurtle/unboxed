@@ -89,10 +89,10 @@ const FALL_SPRITE = sprite_mod.fromArt(&.{
 
 // The swirl's swept path -- a quadratic Bezier bowed past the swirl's own
 // radius, bellying outward into a wide blade. Angles: 0 = right, +y = down.
-const SWIRL_RADIUS: f32 = 9;
-const SWIRL_BULGE: f32 = 17;
-const SWIRL_START_ANGLE: f32 = -2.4;
-const SWIRL_SWEEP_ANGLE: f32 = 4.2;
+const SWIRL_RADIUS: f32 = 13;
+const SWIRL_BULGE: f32 = 24;
+const SWIRL_START_ANGLE: f32 = -2.6;
+const SWIRL_SWEEP_ANGLE: f32 = 5.6;
 
 fn swirlCurvePoint(center: curve.Point, t: f32) curve.Point {
     const end_angle = SWIRL_START_ANGLE + SWIRL_SWEEP_ANGLE;
@@ -105,8 +105,8 @@ fn swirlCurvePoint(center: curve.Point, t: f32) curve.Point {
 
 // 0 at both ends of the swing, peaking at its midpoint -- like a real smear
 // frame, the blade grows fattest exactly where the swing is moving fastest.
-const SWIRL_MIN_DIAM: f32 = 2;
-const SWIRL_MAX_DIAM: f32 = 7;
+const SWIRL_MIN_DIAM: f32 = 3;
+const SWIRL_MAX_DIAM: f32 = 9;
 fn swirlDiameter(t: f32) f32 {
     return SWIRL_MIN_DIAM + @sin(t * std.math.pi) * (SWIRL_MAX_DIAM - SWIRL_MIN_DIAM);
 }

@@ -52,7 +52,6 @@ fn grantPowerup(kind: powerup_types.PowerupKind) void {
             char_types.player.max_hp += EXTRA_HP_GRANT;
             char_types.player.hp += EXTRA_HP_GRANT;
         },
-        .double_jump => char_types.player.has_double_jump = true,
     }
 }
 
@@ -128,7 +127,6 @@ test "newRun resets hp/score/upgrades and starts a fresh room" {
     try testing.expectEqual(char_types.BASE_MAX_HP, char_types.player.hp);
     try testing.expectEqual(char_types.BASE_MAX_HP, char_types.player.max_hp);
     try testing.expectEqual(@as(u32, 0), char_types.player.score);
-    try testing.expect(!char_types.player.has_double_jump);
     try testing.expectEqual(@as(u32, 0), map_types.room_index);
 }
 
@@ -168,17 +166,6 @@ test "collecting a coin increases score" {
     update(0);
 
     try testing.expectEqual(COIN_SCORE, char_types.player.score);
-}
-
-test "collecting a double_jump powerup unlocks it permanently" {
-    newRun();
-    clearField();
-    powerup_types.active = .{ .x = 40, .y = 40, .kind = .double_jump, .placed = true, .revealed = true };
-    char_types.player = .{ .x = 40, .y = 40 };
-
-    update(0);
-
-    try testing.expect(char_types.player.has_double_jump);
 }
 
 test "collecting an extra_hp powerup raises both hp and max_hp" {

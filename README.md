@@ -65,14 +65,14 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 
 ## How to play
 
-**Arrow keys** move, **X** jumps (and double-jumps, once unlocked). Jumping into a wall and holding
-toward it slides you down slowly instead of falling -- press **X** again to wall-jump off it, up
-and away, with a fresh double-jump still available afterward. Walk into a pot to break it -- it may
-reveal a coin (score) or a heart (heals), with a little burst of particles. Three enemy kinds patrol
--- walkers along the ground, creepers up and down a wall, flies back and forth through open air --
-and the only way to defeat one is a midair swirl attack (**Z** while airborne), which hits every
-side at once; touching an enemy any other way, jumping on top included, just hits you back and
-briefly stuns you.
+**Arrow keys** move, **X** jumps. Jumping into a wall and holding toward it slides you down slowly
+instead of falling -- press **X** again to wall-jump off it, up and away. Press **X** again while
+already airborne and not against a wall, and instead of another jump you swing a midair swirl
+attack -- one button, two jobs depending on whether your feet are on the ground. Walk into a pot to
+break it -- it may reveal a coin (score) or a heart (heals), with a little burst of particles. Three
+enemy kinds patrol -- walkers along the ground, creepers up and down a wall, flies back and forth
+through open air -- and the swirl is the only way to defeat one, hitting every side at once; touching
+an enemy any other way, jumping on top included, just hits you back and briefly stuns you.
 
 Every room starts with its doors shut -- clearing every enemy in it (the first room has none, so
 it's already clear) reveals its powerup and opens a door on each side that isn't the one you came

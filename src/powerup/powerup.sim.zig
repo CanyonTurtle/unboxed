@@ -16,10 +16,10 @@ pub fn update(self: *types.Powerup, player_box: collision.Rect) Event {
 const testing = @import("std").testing;
 
 test "update collects a revealed powerup on player contact" {
-    var p = types.Powerup{ .x = 10, .y = 10, .kind = .double_jump, .placed = true, .revealed = true };
+    var p = types.Powerup{ .x = 10, .y = 10, .kind = .extra_hp, .placed = true, .revealed = true };
     const player_box = collision.Rect{ .x = 10, .y = 10, .w = 8, .h = 8 };
     const event = update(&p, player_box);
-    try testing.expectEqual(types.PowerupKind.double_jump, event.collected);
+    try testing.expectEqual(types.PowerupKind.extra_hp, event.collected);
     try testing.expect(p.collected);
 }
 

@@ -9,7 +9,7 @@ pub const BASE_MAX_HP: i32 = 5;
 
 // How far the midair swirl attack reaches on every side of the character --
 // it's an all-around spin, not a directional poke, so it isn't facing-dependent.
-const SWING_RADIUS: f32 = 8;
+const SWING_RADIUS: f32 = 12;
 // How long a swirl attack lasts, in frames -- shared with character.render
 // (the swept-arc animation) so the two can't drift out of sync.
 pub const SWING_FRAMES: u8 = 10;
@@ -32,10 +32,6 @@ pub const Character = struct {
     // so knockback plays out before control returns.
     hit_stun_timer: u16 = 0,
     score: u32 = 0,
-    // Unlocked permanently by a double_jump powerup; air_jumps_used resets
-    // to 0 the instant on_ground goes true (character.sim.update).
-    has_double_jump: bool = false,
-    air_jumps_used: u8 = 0,
     // Which side a wall is on while airborne and pressing into it (-1 left,
     // 0 none, 1 right) -- drives wall-slide and wall-jump (character.sim).
     wall_side: i8 = 0,
