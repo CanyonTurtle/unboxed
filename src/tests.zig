@@ -11,6 +11,7 @@ test {
     _ = @import("room/room.types.zig");
     _ = @import("room/room.sim.zig");
 
+    _ = @import("character/character.types.zig");
     _ = @import("character/character.sim.zig");
     _ = @import("pot/pot.sim.zig");
     _ = @import("item/item.sim.zig");

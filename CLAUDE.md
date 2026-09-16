@@ -252,12 +252,16 @@ terrain.
 ## What's actually implemented here
 
 This is a **prototype of the pattern**, not the game itself: one character
-(move/jump/double-jump/wall-jump/squash-on-land/gravity/collision) with a
-pose per motion state (rise/peak/fall/squash, `character.render.zig`), one
-pot (breaks on contact), two item kinds (coin/heart) and two powerup kinds
-(extra_hp/double_jump, one per room, revealed once its enemies are
-cleared), one enemy kind (patrols, stomp to defeat or it hits back),
-`particle`'s small pops on every break/defeat/collect, and a forward-only
+(move/jump/double-jump/wall-jump/squash-on-land/gravity/collision/midair
+sword swing) with a pose per motion state (rise/peak/fall/squash,
+`character.render.zig`), one pot (breaks on contact), two item kinds
+(coin/heart) and two powerup kinds (extra_hp/double_jump, one per room,
+revealed once its enemies are cleared), three enemy kinds sharing one
+struct (`walker`: ground patrol, turns at walls; `creeper`: patrols
+vertically along a wall; `fly`: patrols horizontally in open air with a
+sine bob) -- all defeated by a stomp from above or the sword, hitting back
+on side contact -- `particle`'s small pops on every break/defeat/collect,
+and a forward-only
 line of procedurally-generated rooms joined by an eased camera slide (see
 "`map/`" above). Each room's 5x5 terrain tiles come in a small rotation of
 ASCII-art variants (`room.render.zig`) for shape, not color, variety. The

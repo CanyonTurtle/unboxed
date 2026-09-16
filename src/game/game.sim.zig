@@ -98,6 +98,16 @@ pub fn update(gamepad: u8) void {
             .defeated => particle_sim.spawnBurst(enemy.x, enemy.y),
             .hit_player => |amount| char_sim.takeDamage(&char_types.player, amount, enemy.x),
         }
+        // A midair sword swing defeats on contact too -- checked separately,
+        // since the sword's hitbox is the character's, not the enemy's, to know about.
+        if (enemy.alive) {
+            if (char_types.player.swingHitbox()) |sword| {
+                if (enemy.aabb().overlaps(sword)) {
+                    enemy.alive = false;
+                    particle_sim.spawnBurst(enemy.x, enemy.y);
+                }
+            }
+        }
     }
 
     switch (powerup_sim.update(&powerup_types.active, char_types.player.aabb())) {
@@ -190,6 +200,17 @@ test "player hp reaching zero ends the run" {
     char_types.player.hp = 0;
     update(0);
     try testing.expect(state.game.game_over);
+}
+
+test "a midair sword swing defeats an enemy on contact" {
+    newRun();
+    clearField();
+    enemy_types.enemies[0] = .{ .kind = .walker, .x = 50, .y = 40, .alive = true };
+    char_types.player = .{ .x = 40, .y = 40, .facing_right = true, .swing_timer = 5, .on_ground = false };
+
+    update(0);
+
+    try testing.expect(!enemy_types.enemies[0].alive);
 }
 
 test "defeating an enemy spawns particles" {

@@ -17,6 +17,7 @@ const WALL_JUMP_PUSH: f32 = 2.0;
 const INVULN_FRAMES: u16 = 45;
 const DAMAGE_KNOCKBACK: f32 = 2.0;
 const SQUASH_FRAMES: u8 = 7;
+const SWING_FRAMES: u8 = 10;
 
 pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     const was_on_ground = self.on_ground;
@@ -68,6 +69,13 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
         (if (moving_left) @as(i8, -1) else 1)
     else
         0;
+
+    // Midair only -- a ground swing would be redundant with just walking
+    // into an enemy, and this is meant to reward staying airborne.
+    if (!self.on_ground and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_2)) {
+        self.swing_timer = SWING_FRAMES;
+    }
+    if (self.swing_timer > 0) self.swing_timer -= 1;
 
     if (self.invuln_timer > 0) self.invuln_timer -= 1;
 }
@@ -186,4 +194,17 @@ test "the squash timer counts down and does not retrigger while already grounded
     var c = types.Character{ .on_ground = true, .squash_timer = 2 };
     update(&c, 0, 0);
     try testing.expectEqual(@as(u8, 1), c.squash_timer);
+}
+
+test "BUTTON_2 starts a sword swing while airborne, never while grounded" {
+    room_types.active = .{};
+    var airborne = types.Character{ .x = 32, .y = 40, .on_ground = false };
+    update(&airborne, w4.BUTTON_2, 0);
+    try testing.expect(airborne.swing_timer > 0);
+
+    room_types.active.tiles[10][6] = .ground; // a floor, so "grounded" actually stays grounded
+    var grounded = types.Character{ .x = 32, .y = 40, .on_ground = true };
+    update(&grounded, w4.BUTTON_2, 0);
+    try testing.expect(grounded.on_ground);
+    try testing.expectEqual(@as(u8, 0), grounded.swing_timer);
 }

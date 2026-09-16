@@ -39,8 +39,12 @@ fn generateInto(save: *map_types.RoomSave, index: u32, is_start: bool) void {
     const enemy_count: usize = if (is_start) 0 else 1 + @min(index, enemy_types.MAX_COUNT - 1);
     for (&save.enemies, 0..) |*enemy, i| {
         if (i < enemy_count) {
-            const spot = room_sim.randomFloorSpot(&save.room, &rng);
-            enemy.* = .{ .x = tilePx(spot.tx), .y = tilePx(spot.ty), .alive = true };
+            const kind: enemy_types.EnemyKind = switch (rng.range(3)) {
+                0 => .walker,
+                1 => .creeper,
+                else => .fly,
+            };
+            spawnEnemy(enemy, kind, &save.room, &rng);
         } else {
             enemy.* = .{};
         }
@@ -56,6 +60,30 @@ fn generateInto(save: *map_types.RoomSave, index: u32, is_start: bool) void {
             .kind = if (index >= 3) .double_jump else .extra_hp,
             .placed = true,
         };
+    }
+}
+
+// Placement is kind-specific (ground, wall range, or open-air range) --
+// only walker's goes through randomFloorSpot.
+fn spawnEnemy(enemy: *enemy_types.Enemy, kind: enemy_types.EnemyKind, room: *const room_types.Room, rng: *rng_mod.Rng) void {
+    switch (kind) {
+        .walker => {
+            const spot = room_sim.randomFloorSpot(room, rng);
+            enemy.* = .{ .kind = .walker, .x = tilePx(spot.tx), .y = tilePx(spot.ty), .alive = true };
+        },
+        .creeper => {
+            const on_left = rng.range(2) == 0;
+            const x = if (on_left) tilePx(2) else tilePx(room_types.GRID_W - 3);
+            const top = tilePx(4);
+            const bottom = tilePx(room_types.FLOOR_ROW - 4);
+            enemy.* = .{ .kind = .creeper, .x = x, .y = top, .range_min = top, .range_max = bottom, .alive = true };
+        },
+        .fly => {
+            const left = tilePx(4);
+            const right = tilePx(room_types.GRID_W - 6);
+            const y = tilePx(rng.between(8, 18));
+            enemy.* = .{ .kind = .fly, .x = left, .y = y, .base_y = y, .range_min = left, .range_max = right, .facing_right = true, .alive = true };
+        },
     }
 }
 

@@ -1,5 +1,5 @@
-// Draws the player character. Each pose is its own ASCII-art sprite, picked
-// from vertical speed/ground state -- squash on landing, rise/peak/fall in the air.
+// Draws the player character (squash on landing, rise/peak/fall in the
+// air) and, while swinging, one extra sword-slash sprite over the top.
 
 const w4 = @import("../wasm4.zig");
 const sprite_mod = @import("../core/core.sprite.zig");
@@ -9,15 +9,19 @@ const types = @import("character.types.zig");
 // band reads as "hanging near the peak", outside as rising or falling.
 const PEAK_BAND: f32 = 1.0;
 
+// Humanoid: head, neck, shoulders/arms, torso, hips, separated legs, feet.
 const IDLE_SPRITE = sprite_mod.fromArt(&.{
     "..####..",
     ".######.",
-    "##.##.##",
-    "########",
-    "..####..",
     ".#.##.#.",
-    "#..##..#",
-    "..#..#..",
+    "..####..",
+    "########",
+    ".######.",
+    ".######.",
+    "..####..",
+    ".#....#.",
+    ".#....#.",
+    "##....##",
 });
 
 const SQUASH_SPRITE = sprite_mod.fromArt(&.{
@@ -25,8 +29,11 @@ const SQUASH_SPRITE = sprite_mod.fromArt(&.{
     "........",
     "........",
     "........",
+    "........",
+    "........",
     "########",
     "##.##.##",
+    "########",
     "########",
     "#.####.#",
 });
@@ -34,8 +41,11 @@ const SQUASH_SPRITE = sprite_mod.fromArt(&.{
 const RISE_SPRITE = sprite_mod.fromArt(&.{
     "..####..",
     ".######.",
-    "##.##.##",
+    ".#.##.#.",
+    "..####..",
     "########",
+    ".######.",
+    ".######.",
     "..####..",
     "...##...",
     "..#..#..",
@@ -43,25 +53,40 @@ const RISE_SPRITE = sprite_mod.fromArt(&.{
 });
 
 const PEAK_SPRITE = sprite_mod.fromArt(&.{
-    "........",
     "..####..",
     ".######.",
-    "#.####.#",
-    "########",
+    ".#.##.#.",
+    "..####..",
+    ".######.",
+    ".######.",
     "..####..",
     ".#....#.",
+    "..#..#..",
+    "........",
     "........",
 });
 
 const FALL_SPRITE = sprite_mod.fromArt(&.{
-    "........",
     "..####..",
     ".######.",
-    "##.##.##",
-    "########",
-    "#.####.#",
     ".#.##.#.",
+    "#.####.#",
+    "########",
+    ".######.",
+    ".######.",
+    ".#....#.",
     "#......#",
+    "#......#",
+    "........",
+});
+
+// A short diagonal slash -- drawn once past the character's own silhouette,
+// on whichever side they're facing.
+const SWORD_SPRITE = sprite_mod.fromArt(&.{
+    "......##.",
+    "....##...",
+    "..##.....",
+    "##.......",
 });
 
 fn pickSprite(char: types.Character) *const sprite_mod.Sprite {
@@ -80,4 +105,9 @@ pub fn draw(char: types.Character) void {
     // 1BPP '#' bits (core.sprite.fromArt) read DRAW_COLORS' color2 slot.
     w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3] (yellow)
     pickSprite(char).draw(@intFromFloat(char.x), @intFromFloat(char.y), !char.facing_right);
+
+    if (char.swingHitbox()) |box| {
+        w4.DRAW_COLORS.* = 0x0020; // color2 = palette[1] (white) -- stands out from both bg and player
+        SWORD_SPRITE.draw(@intFromFloat(box.x), @intFromFloat(box.y), !char.facing_right);
+    }
 }
