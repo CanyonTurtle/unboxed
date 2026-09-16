@@ -92,6 +92,7 @@ fn loadActive() void {
     enemy_types.enemies = save.enemies;
     powerup_types.active = save.powerup;
     dig_progress = [_]u16{0} ** 4;
+    room_types.active_dig_ratio = [_]f32{0} ** 4;
     syncOpenSides();
 }
 
@@ -156,20 +157,23 @@ fn breakThrough(side: room_types.Side) void {
     if (map_types.neighbor(map_types.current_rx, map_types.current_ry, side)) |n| generateRoom(n.rx, n.ry);
 }
 
-// Exits only ever open once every enemy in the room is down -- the
-// "acrobatics to clear it" gate the wall-breaking reward sits behind.
+// Exits only open once every enemy in the room is down. `active_dig_ratio`
+// is written purely for room.render's feedback -- it never gates anything.
 fn updateDigging(gamepad: u8, player: *const char_types.Character) void {
     if (!isRoomCleared()) {
         dig_progress = [_]u16{0} ** 4;
+        room_types.active_dig_ratio = [_]f32{0} ** 4;
         return;
     }
     for (ALL_SIDES, 0..) |side, i| {
         if (room_types.active_open_sides[i]) {
             dig_progress[i] = 0;
+            room_types.active_dig_ratio[i] = 0;
             continue;
         }
         const toughness = map_types.toughnessFor(map_types.current_rx, map_types.current_ry, side) orelse {
             dig_progress[i] = 0;
+            room_types.active_dig_ratio[i] = 0;
             continue;
         };
         if (touchingSide(player, side) and digInput(gamepad, side)) {
@@ -178,6 +182,7 @@ fn updateDigging(gamepad: u8, player: *const char_types.Character) void {
         } else {
             dig_progress[i] = 0;
         }
+        room_types.active_dig_ratio[i] = @as(f32, @floatFromInt(dig_progress[i])) / @as(f32, @floatFromInt(toughness));
     }
 }
 

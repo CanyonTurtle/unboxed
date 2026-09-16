@@ -18,6 +18,16 @@ const WALL_VARIANTS = [_]sprite_mod.Sprite{
     sprite_mod.fromArt(&.{ "#####", "##.##", "#####", "##.##", "#####" }),
 };
 
+// A visibly different pattern (mostly gaps, not a solid fill) so a
+// room's diggable spot never looks like ordinary permanent wall.
+const DIGGABLE_SPRITE = sprite_mod.fromArt(&.{
+    "#...#",
+    ".#.#.",
+    "..#..",
+    ".#.#.",
+    "#...#",
+});
+
 // A cheap position hash (not a real PRNG) -- deterministic per tile so the
 // pattern never flickers frame to frame, with no need to store a variant.
 fn variantIndex(tx: usize, ty: usize, count: u32) u32 {
@@ -43,8 +53,14 @@ pub fn draw() void {
                     GROUND_VARIANTS[variantIndex(tx, ty, GROUND_VARIANTS.len)].draw(x, y, false);
                 },
                 .wall => {
-                    w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3]
-                    WALL_VARIANTS[variantIndex(tx, ty, WALL_VARIANTS.len)].draw(x, y, false);
+                    if (types.spanSideAt(@intCast(tx), @intCast(ty))) |side| {
+                        const digging = types.active_dig_ratio[@intFromEnum(side)] > 0;
+                        w4.DRAW_COLORS.* = if (digging) 0x0040 else 0x0020; // red while dug, white otherwise
+                        DIGGABLE_SPRITE.draw(x, y, false);
+                    } else {
+                        w4.DRAW_COLORS.* = 0x0040; // color2 = palette[3]
+                        WALL_VARIANTS[variantIndex(tx, ty, WALL_VARIANTS.len)].draw(x, y, false);
+                    }
                 },
             }
         }

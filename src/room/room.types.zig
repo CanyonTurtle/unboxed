@@ -41,9 +41,23 @@ pub fn exitSpan(side: Side) TileSpan {
     };
 }
 
+// Which side (if any) a tile belongs to's gap span, open or not -- used to
+// mark diggable tiles visually distinct from ordinary permanent wall.
+pub fn spanSideAt(tx: u32, ty: u32) ?Side {
+    for (ALL_SIDES) |side| {
+        const span = exitSpan(side);
+        if (tx >= span.tx0 and tx <= span.tx1 and ty >= span.ty0 and ty <= span.ty1) return side;
+    }
+    return null;
+}
+
 // Which sides of the *currently active* room have an open gap -- map.sim
 // writes this whenever it loads a room or breaks a wall through it.
 pub var active_open_sides: [4]bool = [_]bool{false} ** 4;
+
+// 0..1 dig charge per side of the active room, purely for feedback -- see
+// map.sim.updateDigging, which is the only writer.
+pub var active_dig_ratio: [4]f32 = [_]f32{0} ** 4;
 
 pub fn isOpenExitTile(tx: i32, ty: i32) bool {
     if (tx < 0 or ty < 0) return false;

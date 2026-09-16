@@ -71,10 +71,12 @@ and away, with a fresh double-jump still available afterward. Walk into a pot to
 reveal a coin (score) or a heart (heals). Enemies patrol back and forth: jump on one from above to
 defeat it, or touch it from the side and it hits back.
 
-Once every enemy in a room is down, its powerup is revealed and its 4 walls become diggable: walk
-into one and hold the direction toward it (**up**/**down** for the top/bottom walls) to charge
-through. Walls guarding a room further from the start take longer to dig through, but that room's
-reward is better for it. Losing all your HP ends the run; press **X** to start a fresh map.
+Rooms don't start with any exit -- clearing every enemy in a room (the start room has none, so
+it's already clear) reveals its powerup and marks a diggable spot on each of its 4 sides with a
+distinct checkered pattern. Walk into one and hold the direction toward it (**up**/**down** for the
+top/bottom walls) to charge through -- the spot turns red and the HUD shows your progress while
+you're digging. Walls guarding a room further from the start take longer to dig through, but that
+room's reward is better for it. Losing all your HP ends the run; press **X** to start a fresh map.
 
 ## Project layout
 

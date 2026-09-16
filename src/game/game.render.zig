@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const w4 = @import("../wasm4.zig");
+const room_types = @import("../room/room.types.zig");
 const room_render = @import("../room/room.render.zig");
 const char_types = @import("../character/character.types.zig");
 const char_render = @import("../character/character.render.zig");
@@ -39,6 +40,19 @@ fn drawHud() void {
         map_types.current_ry,
     }) catch return;
     w4.Text(line, 2, 2);
+    drawDigHint();
+}
+
+// The clearest hint that a wall is breaking is the wall itself changing
+// look (room.render's DIGGABLE_SPRITE) -- this just names the mechanic.
+fn drawDigHint() void {
+    var best: f32 = 0;
+    for (room_types.active_dig_ratio) |ratio| best = @max(best, ratio);
+    if (best <= 0) return;
+    var buf: [16]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "DIGGING {d}%", .{@as(u32, @intFromFloat(best * 100))}) catch return;
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text(line, 2, 12);
 }
 
 fn drawGameOver() void {
