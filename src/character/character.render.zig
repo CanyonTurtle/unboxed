@@ -1,9 +1,15 @@
 // Draws the player character (squash on landing, rise/peak/fall in the
 // air) and, while swinging, a curved arc of blocks sweeping around them.
 
+const std = @import("std");
 const w4 = @import("../wasm4.zig");
 const sprite_mod = @import("../core/core.sprite.zig");
+const curve = @import("../core/core.curve.zig");
 const types = @import("character.types.zig");
+
+// How finely the swirl's curve is subdivided -- higher reads smoother but
+// costs more Oval draw calls per frame while swinging.
+const SWIRL_SAMPLES: u32 = 14;
 
 // Airborne poses are picked by comparing vel_y against this -- inside the
 // band reads as "hanging near the peak", outside as rising or falling.
@@ -81,32 +87,29 @@ const FALL_SPRITE = sprite_mod.fromArt(&.{
     "........",
 });
 
-// One filled block of the arc trail -- several are drawn per frame (see
-// SWIRL_ARC_LEN below) so the swing reads as a swept curve, not one dot.
-const SWORD_SPRITE = sprite_mod.fromArt(&.{
-    "##",
-    "##",
-});
-
-// 12 points around the circle; each frame draws SWIRL_ARC_LEN consecutive
-// ones as a crescent, whose start rotates with swing_timer -- so the crescent itself sweeps.
-const SWIRL_STEPS = 12;
-const SWIRL_ARC_LEN = 5;
+// The swirl's swept path -- a quadratic Bezier bowed past the swirl's own
+// radius, bellying outward into a wide blade. Angles: 0 = right, +y = down.
 const SWIRL_RADIUS: f32 = 9;
-const SWIRL_OFFSETS = [SWIRL_STEPS]struct { dx: f32, dy: f32 }{
-    .{ .dx = 1.0, .dy = 0.0 },
-    .{ .dx = 0.87, .dy = -0.5 },
-    .{ .dx = 0.5, .dy = -0.87 },
-    .{ .dx = 0.0, .dy = -1.0 },
-    .{ .dx = -0.5, .dy = -0.87 },
-    .{ .dx = -0.87, .dy = -0.5 },
-    .{ .dx = -1.0, .dy = 0.0 },
-    .{ .dx = -0.87, .dy = 0.5 },
-    .{ .dx = -0.5, .dy = 0.87 },
-    .{ .dx = 0.0, .dy = 1.0 },
-    .{ .dx = 0.5, .dy = 0.87 },
-    .{ .dx = 0.87, .dy = 0.5 },
-};
+const SWIRL_BULGE: f32 = 17;
+const SWIRL_START_ANGLE: f32 = -2.4;
+const SWIRL_SWEEP_ANGLE: f32 = 4.2;
+
+fn swirlCurvePoint(center: curve.Point, t: f32) curve.Point {
+    const end_angle = SWIRL_START_ANGLE + SWIRL_SWEEP_ANGLE;
+    const mid_angle = (SWIRL_START_ANGLE + end_angle) / 2;
+    const p0 = curve.Point{ .x = center.x + @cos(SWIRL_START_ANGLE) * SWIRL_RADIUS, .y = center.y + @sin(SWIRL_START_ANGLE) * SWIRL_RADIUS };
+    const p1 = curve.Point{ .x = center.x + @cos(mid_angle) * SWIRL_BULGE, .y = center.y + @sin(mid_angle) * SWIRL_BULGE };
+    const p2 = curve.Point{ .x = center.x + @cos(end_angle) * SWIRL_RADIUS, .y = center.y + @sin(end_angle) * SWIRL_RADIUS };
+    return curve.quadraticBezier(p0, p1, p2, t);
+}
+
+// 0 at both ends of the swing, peaking at its midpoint -- like a real smear
+// frame, the blade grows fattest exactly where the swing is moving fastest.
+const SWIRL_MIN_DIAM: f32 = 2;
+const SWIRL_MAX_DIAM: f32 = 7;
+fn swirlDiameter(t: f32) f32 {
+    return SWIRL_MIN_DIAM + @sin(t * std.math.pi) * (SWIRL_MAX_DIAM - SWIRL_MIN_DIAM);
+}
 
 fn pickSprite(char: types.Character) *const sprite_mod.Sprite {
     if (char.squash_timer > 0) return &SQUASH_SPRITE;
@@ -126,18 +129,20 @@ pub fn draw(char: types.Character) void {
     pickSprite(char).draw(@intFromFloat(char.x), @intFromFloat(char.y), !char.facing_right);
 
     if (char.swing_timer > 0) {
-        const center_x = char.x + types.WIDTH / 2;
-        const center_y = char.y + types.HEIGHT / 2;
-        const head: usize = char.swing_timer % SWIRL_STEPS;
-        w4.DRAW_COLORS.* = 0x0020; // color2 = palette[1] (white) -- stands out from both bg and player
-        var i: usize = 0;
-        while (i < SWIRL_ARC_LEN) : (i += 1) {
-            const step = SWIRL_OFFSETS[(head + i) % SWIRL_STEPS];
-            SWORD_SPRITE.draw(
-                @intFromFloat(center_x + step.dx * SWIRL_RADIUS - 1),
-                @intFromFloat(center_y + step.dy * SWIRL_RADIUS - 1),
-                false,
-            );
+        const center = curve.Point{ .x = char.x + types.WIDTH / 2, .y = char.y + types.HEIGHT / 2 };
+        const elapsed = types.SWING_FRAMES - char.swing_timer;
+        const progress = @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(types.SWING_FRAMES));
+        w4.DRAW_COLORS.* = 0x0002; // color1 = palette[1] (white) fill, color2 = transparent (no border)
+        // Redraws the whole swept-so-far curve every frame, each sample
+        // sized by its own t, so the trail keeps its "squash" belly shape.
+        var i: u32 = 0;
+        while (i <= SWIRL_SAMPLES) : (i += 1) {
+            const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(SWIRL_SAMPLES));
+            if (t > progress) break;
+            const p = swirlCurvePoint(center, t);
+            const diam = swirlDiameter(t);
+            const half = diam / 2;
+            w4.Oval(@intFromFloat(p.x - half), @intFromFloat(p.y - half), @intFromFloat(diam), @intFromFloat(diam));
         }
     }
 }

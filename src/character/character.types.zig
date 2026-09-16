@@ -10,6 +10,9 @@ pub const BASE_MAX_HP: i32 = 5;
 // How far the midair swirl attack reaches on every side of the character --
 // it's an all-around spin, not a directional poke, so it isn't facing-dependent.
 const SWING_RADIUS: f32 = 8;
+// How long a swirl attack lasts, in frames -- shared with character.render
+// (the swept-arc animation) so the two can't drift out of sync.
+pub const SWING_FRAMES: u8 = 10;
 
 pub const Character = struct {
     x: f32 = 0,

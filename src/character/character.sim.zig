@@ -17,7 +17,6 @@ const WALL_JUMP_PUSH: f32 = 2.0;
 const INVULN_FRAMES: u16 = 45;
 const DAMAGE_KNOCKBACK: f32 = 2.0;
 const SQUASH_FRAMES: u8 = 7;
-const SWING_FRAMES: u8 = 10;
 const HIT_STUN_FRAMES: u16 = 12;
 
 pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
@@ -83,7 +82,7 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     // Midair only -- a ground swing would be redundant with just walking
     // into an enemy, and this is meant to reward staying airborne.
     if (!stunned and !self.on_ground and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_2)) {
-        self.swing_timer = SWING_FRAMES;
+        self.swing_timer = types.SWING_FRAMES;
     }
     if (self.swing_timer > 0) self.swing_timer -= 1;
 

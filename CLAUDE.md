@@ -51,7 +51,8 @@ orchestrator tying every other concept together -- see below).
 `src/core/core.<concern>.zig` holds behavior more than one locality folder
 needs: `core.sprite` (the ASCII-art sprite type + blit), `core.collision`
 (AABB overlap + tile collision), `core.gravity`, `core.input` (gamepad edge
-detection), `core.rng` (deterministic xorshift32).
+detection), `core.rng` (deterministic xorshift32), `core.camera` (easing),
+`core.curve` (parametric-curve points -- e.g. a swept-attack trail).
 
 The test for "does this belong in `core/`": would a second entity kind
 plausibly need it too? Gravity and collision, yes -- every physical entity
