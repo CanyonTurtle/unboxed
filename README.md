@@ -1,10 +1,10 @@
 # unboxed
 
 A procedurally-generated roguelike-platformer for the [WASM-4](https://wasm4.org) fantasy console,
-written in Zig. You play a tank gripping a room's floor, wall, or ceiling -- hold a direction to
-rev it up, let go to launch into a leaping swirl attack. Break pots, collect items, and clear each
-room of enemies to move on through one of its doors into a fresh room further down the line,
-picking up permanent powerups along the way.
+written in Zig, and a one-button game: you play a tank gripping a room's floor, wall, or ceiling --
+hold the button to rev it up, let go to launch into a leaping swirl attack, or just tap it to turn
+around. Break pots, collect items, and clear each room of enemies to move on through one of its
+doors into a fresh room further down the line, picking up permanent powerups along the way.
 
 This repo is also a from-scratch reboot of an earlier platformer's architecture -- see
 [CLAUDE.md](CLAUDE.md) for the organizing ideas (locality-based folders, assets defined in code,
@@ -66,17 +66,16 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 
 ## How to play
 
-The tank only moves while you're driving it: **arrow keys** don't move it directly, they hold down
-the throttle (only the two keys along whatever surface it's gripping do anything -- left/right on
-the floor or ceiling, up/down on a wall), and holding one revs it up rather than snapping straight
-to full speed. Let go of neither and it just coasts to a stop and sits there. **Releasing a held
-direction is the jump**: it leaps off whatever it's gripping -- further the more you'd revved up --
-arcing through the air while throwing a midair swirl attack at the same instant, then lands
-somewhere new sitting still, ready for another hold. Press **X** for an extra swirl mid-air, hitting
-every side at once. Drive it into the end of a floor or ceiling and it corners onto the next wall
-automatically, so holding one direction through a corner keeps it crawling around a room's inside
-perimeter. Driving into a pot breaks it -- it may reveal a coin (score) or a heart (heals), with a
-little burst of particles. Three enemy kinds patrol -- walkers along the ground, creepers up and
+One button, **X**, does everything. Hold it and the tank revs up along whatever surface it's
+gripping instead of snapping straight to full speed; let go of nothing and it just sits still. A
+quick **tap** turns the tank around in place. **Hold it for real, then release**, and it's the
+jump: it leaps off whatever it's gripping -- further the more you'd revved up -- arcing through the
+air while throwing a midair swirl attack at the same instant, then lands somewhere new sitting
+still, ready for another hold. Press **X** again while already airborne for an extra swirl, hitting
+every side at once. Drive into the end of a floor or ceiling and it corners onto the next wall
+automatically, so holding through a corner keeps it crawling around a room's inside perimeter.
+Driving into a pot breaks it -- it may reveal a coin (score) or a heart (heals), with a little burst
+of particles. Three enemy kinds patrol -- walkers along the ground, creepers up and
 down a wall, flies back and forth through open air -- and the swirl is the only way to defeat one;
 touching an enemy any other way just hits you back and briefly stuns you.
 

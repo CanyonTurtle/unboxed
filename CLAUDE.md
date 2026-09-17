@@ -153,25 +153,25 @@ the player, since the player *is* what's transitioning.
 
 The player is a tank gripping one of a room's 4 inner surfaces --
 `character.types.Surface`: `floor`, `ceiling`, `left_wall`, `right_wall`, or
-`null` for airborne (mid-leap, or falling after losing grip). Arrow keys
-never set velocity directly; `character.sim.steerButtons` picks which two
-of the four apply (only one axis, whichever the current surface travels
-along, means anything), and holding one **revs up** `Character.speed`
-(`ACCEL` per frame, capped at `MAX_SPEED`) rather than snapping straight to
-a constant -- holding the *other* one brakes `speed` back to 0 first before
-committing to the new `clockwise` sense, and holding neither (or both)
-just bleeds `speed` off. **The tank only moves while a direction is held**;
-at `speed == 0` it sits completely still.
+`null` for airborne (mid-leap, or falling after losing grip). **It's a
+one-button game**: `w4.BUTTON_1` is the only input `character.sim` reads.
+Holding it **revs up** `Character.speed` (`ACCEL` per frame, capped at
+`MAX_SPEED`) along whichever axis the current surface travels; releasing
+below `TURN_THRESHOLD` reads as a tap and just flips `clockwise` in place
+(no leap, no charge kept), while releasing above it launches. There's no
+separate steer input, so direction changes are a quick tap and speed
+changes are a hold -- the same button, told apart by how long it was down.
+**The tank only moves while held**; at `speed == 0` it sits completely still.
 
-**Releasing** a held direction (`character.sim.update`'s `releasing`,
-a was-throttling-now-isn't edge) is the jump: it leaps the tank off its
-surface, launching along that surface's grip direction scaled by whatever
-`speed` had built up (`leap_base + speed*leap_scale` -- a tap still hops,
-a fully-revved release launches much further; wall leaps use weaker
+**Releasing** past `TURN_THRESHOLD` (`character.sim.update`'s `releasing`,
+a was-held-now-isn't edge) is the jump: it leaps the tank off its surface,
+launching along that surface's grip direction scaled by whatever `speed`
+had built up (`leap_base + speed*leap_scale` -- a light hold still hops, a
+fully-revved release launches much further; wall leaps use weaker
 `WALL_LEAP_*` constants across the board), carries the rest of that speed
 into the arc as the perpendicular component, throws the midair swirl
 attack at the same instant, and resets `speed` to 0 -- it lands sitting
-still, awaiting a fresh hold. Pressed again mid-air, the jump button
+still, awaiting a fresh hold. Pressed again mid-air, the same button
 throws an *extra* swirl manually (`character.sim.update`'s `else` branch).
 
 Each surface has a **grip axis** (the constant small push that keeps the
