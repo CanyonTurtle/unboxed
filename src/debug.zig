@@ -37,3 +37,14 @@ pub fn getTransitionFrame() callconv(.c) u32 {
     return map_types.transition.frame;
 }
 
+// 0=floor, 1=ceiling, 2=left_wall, 3=right_wall, 4=airborne (no surface).
+pub fn getSurface() callconv(.c) u32 {
+    const s = char_types.player.surface orelse return 4;
+    return switch (s) {
+        .floor => 0,
+        .ceiling => 1,
+        .left_wall => 2,
+        .right_wall => 3,
+    };
+}
+

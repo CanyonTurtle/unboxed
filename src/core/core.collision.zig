@@ -22,6 +22,9 @@ pub const TileQuery = struct {
 pub const MoveResult = struct {
     on_ground: bool = false,
     hit_wall: bool = false,
+    // Set for an upward collision (vel_y < 0), same as hit_wall is for
+    // either x direction -- on_ground only ever covers the downward case.
+    hit_ceiling: bool = false,
 };
 
 fn tileFloor(v: f32, tile_size: f32) i32 {
@@ -70,6 +73,7 @@ pub fn moveAndCollide(x: *f32, y: *f32, w: f32, h: f32, vel_x: *f32, vel_y: *f32
             result.on_ground = true;
         } else if (vel_y.* < 0) {
             y.* = @as(f32, @floatFromInt(hit.ty + 1)) * ts;
+            result.hit_ceiling = true;
         }
         vel_y.* = 0;
     }
@@ -135,6 +139,23 @@ test "moveAndCollide stops horizontal movement at a wall" {
     try testing.expect(result.hit_wall);
     try testing.expectEqual(@as(f32, 0), vx);
     try testing.expectEqual(@as(f32, 24 - 8), x);
+}
+
+test "moveAndCollide reports hit_ceiling for an upward collision, never on_ground" {
+    TestGrid.reset();
+    TestGrid.solid[2][2] = true; // ceiling tile directly above the box
+    const tiles = TileQuery{ .tile_size = 8, .isSolid = &TestGrid.isSolid };
+
+    var x: f32 = 16;
+    var y: f32 = 32; // moving up toward the tile at ty=2 (bottom edge y=24)
+    var vx: f32 = 0;
+    var vy: f32 = -10;
+    const result = moveAndCollide(&x, &y, 8, 8, &vx, &vy, tiles);
+
+    try testing.expect(result.hit_ceiling);
+    try testing.expect(!result.on_ground);
+    try testing.expectEqual(@as(f32, 0), vy);
+    try testing.expectEqual(@as(f32, 24), y);
 }
 
 test "moveAndCollide reports on_ground for a box resting on a boundary with zero velocity" {

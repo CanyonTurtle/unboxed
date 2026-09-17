@@ -149,6 +149,45 @@ room, see `map.sim.entryPosition`) -- the one other place, besides a
 `RideResult`-style report, where a non-`game.sim` file is allowed to move
 the player, since the player *is* what's transitioning.
 
+## `character/`: a tank that never stops
+
+The player is a tank, not a walker: it never sits idle, always auto-driving
+along whichever of a room's 4 inner surfaces it currently grips --
+`character.types.Surface`: `floor`, `ceiling`, `left_wall`, `right_wall`, or
+`null` for airborne (mid-leap, or falling after losing grip). Arrow keys
+never set velocity directly; they only steer, i.e. flip `Character.
+clockwise`, the rotational sense the tank drives in -- `character.sim.
+steerButtons` picks which two of the four arrow buttons apply, since only
+one axis (whichever the current surface travels along) means anything.
+
+Each surface has a **grip axis** (the constant small push that keeps the
+tank snapped against it, standing in for gravity) and a **travel axis**
+(the constant-speed drive, perpendicular to grip) -- `character.sim.
+gripAxisIsX`/`gripSign`/`travelSign` compute both from `(surface,
+clockwise)`. Reaching the end of the current surface (`travel_blocked` in
+`update`) corner-turns onto the next one via `nextSurface`, in the same
+rotational sense -- drive with no input at all and the tank crawls the
+whole inside perimeter of a room, floor to wall to ceiling and back. **A
+new door direction or room shape needs this cycle re-checked**: `nextSurface`
+hard-codes a rectangular room's 4-surface loop.
+
+**`core.collision.moveAndCollide`'s `on_ground`/`hit_wall`/`hit_ceiling`
+flags aren't symmetric** -- `hit_wall` fires for a collision in *either* x
+direction, but `on_ground` only for a downward (+y) hit and `hit_ceiling`
+only for an upward (-y) one. Generalizing gravity to 4 possible directions
+means always checking `on_ground or hit_ceiling` for "blocked on y",
+never just one -- getting this wrong silently wedges the tank at a
+surface's end instead of corner-turning (see `character.sim.update`'s
+`x_blocked`/`y_blocked` for the pattern).
+
+The jump button leaps the tank off its current surface (`surface = null`),
+launching it away at `LEAP_SPEED` along that surface's grip direction,
+carrying its travel speed into the arc -- one motion covers the old ground
+jump, wall-jump, all of them, since every surface now works the same way.
+Landing on anything while airborne reattaches to a surface based on which
+side the collision hit. Pressed again mid-air, the same button triggers
+the midair swirl attack instead (`character.sim.update`'s `else` branch).
+
 ## State: `pub var`, one per locality
 
 Each locality owns its own live data as a `pub var` in `.types.zig`
@@ -253,12 +292,13 @@ terrain.
 ## What's actually implemented here
 
 This is a **prototype of the pattern**, not the game itself: one character
-(move/jump/wall-jump/squash-on-land/gravity/collision/hit stun) with a
-pose per motion state (rise/peak/fall/squash, `character.render.zig`) and
-one attack -- a midair swirl, sharing jump's own button, that only
-triggers when airborne and not clinging to a wall (see character.sim.
-update's jump-button branch) -- one pot (breaks on contact), two item
-kinds (coin/heart) and one powerup kind (extra_hp, one per room, revealed
+-- a tank that never stops, auto-driving whatever surface it grips and
+corner-turning at its end (see "`character/`" above), with rolling-tread/
+rise/peak/fall/squash poses (`character.render.zig`) -- and one attack: a
+midair swirl, sharing the jump button, that only triggers
+when airborne (character.sim.update's jump-button branch) -- one pot
+(breaks on contact), two item kinds (coin/heart) and one powerup kind
+(extra_hp, one per room, revealed
 once its enemies are cleared), three enemy kinds sharing one
 struct (`walker`: ground patrol, turns at walls; `creeper`: patrols
 vertically along a wall; `fly`: patrols horizontally in open air with a

@@ -14,13 +14,23 @@ const SWING_RADIUS: f32 = 12;
 // (the swept-arc animation) so the two can't drift out of sync.
 pub const SWING_FRAMES: u8 = 10;
 
+// Which of the room's 4 inner surfaces the tank grips -- null means airborne.
+// See character.sim.update for the per-surface travel/grip axis mapping.
+pub const Surface = enum { floor, ceiling, left_wall, right_wall };
+
 pub const Character = struct {
     x: f32 = 0,
     y: f32 = 0,
     vel_x: f32 = 0,
     vel_y: f32 = 0,
     facing_right: bool = true,
-    on_ground: bool = false,
+    surface: ?Surface = null,
+    // Rotational sense the tank drives in (true = clockwise) -- steering
+    // only ever flips this; the tank never stops moving.
+    clockwise: bool = false,
+    // Wraps continuously while gripping a surface -- character.render uses
+    // it to alternate tread frames, giving the tracks a rolling look.
+    drive_anim: u16 = 0,
     hp: i32 = BASE_MAX_HP,
     // Raised permanently by an extra_hp powerup (powerup.sim) -- BASE_MAX_HP
     // is only the run's starting cap.
@@ -32,9 +42,6 @@ pub const Character = struct {
     // so knockback plays out before control returns.
     hit_stun_timer: u16 = 0,
     score: u32 = 0,
-    // Which side a wall is on while airborne and pressing into it (-1 left,
-    // 0 none, 1 right) -- drives wall-slide and wall-jump (character.sim).
-    wall_side: i8 = 0,
     // Nonzero for a few frames right after landing -- character.render
     // shows a squashed pose while it counts down (character.sim.update).
     squash_timer: u8 = 0,

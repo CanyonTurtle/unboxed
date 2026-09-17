@@ -1,5 +1,5 @@
-// Character movement: reads gamepad input, then leans on core.gravity/
-// core.collision for physics -- this file only holds character-specific tuning.
+// Character movement: a tank that never stops, auto-driving a gripped
+// surface, corner-turning at its end. Jump leaps off; mid-air it swirls.
 
 const std = @import("std");
 const w4 = @import("../wasm4.zig");
@@ -9,132 +9,219 @@ const collision = @import("../core/core.collision.zig");
 const room_types = @import("../room/room.types.zig");
 const types = @import("character.types.zig");
 
-const MOVE_ACCEL: f32 = 0.4;
-const MOVE_MAX_SPEED: f32 = 1.6;
-const FRICTION: f32 = 0.8;
-const JUMP_VELOCITY: f32 = -4.2;
-const WALL_JUMP_PUSH: f32 = 2.0;
-const INVULN_FRAMES: u16 = 45;
+const FORWARD_SPEED: f32 = 1.1; // constant drive speed along whatever surface is gripped
+const GRIP_SPEED: f32 = 0.6; // constant push into the gripped surface, keeping it snapped there
+const LEAP_SPEED: f32 = 4.2; // magnitude of a leap off the current surface, direction below
 const DAMAGE_KNOCKBACK: f32 = 2.0;
+const INVULN_FRAMES: u16 = 45;
 const SQUASH_FRAMES: u8 = 7;
 const HIT_STUN_FRAMES: u16 = 12;
 
+// True for the two wall surfaces, where "into the surface" is a horizontal
+// push and travel runs vertically -- false for floor/ceiling, the reverse.
+fn gripAxisIsX(surface: types.Surface) bool {
+    return surface == .left_wall or surface == .right_wall;
+}
+
+// Which way, along the grip axis, points *into* the surface being gripped.
+fn gripSign(surface: types.Surface) f32 {
+    return switch (surface) {
+        .floor => 1,
+        .ceiling => -1,
+        .left_wall => -1,
+        .right_wall => 1,
+    };
+}
+
+// Which way is "clockwise" along the travel axis for this surface -- floor
+// left, left_wall up, ceiling right, right_wall down -- so cw traces the perimeter.
+fn travelSign(surface: types.Surface, clockwise: bool) f32 {
+    const cw_sign: f32 = switch (surface) {
+        .floor => -1,
+        .left_wall => -1,
+        .ceiling => 1,
+        .right_wall => 1,
+    };
+    return if (clockwise) cw_sign else -cw_sign;
+}
+
+// The next surface reached by traveling off the end of this one, in the
+// same rotational sense -- the perimeter cycle floor/left_wall/ceiling/right_wall.
+fn nextSurface(surface: types.Surface, clockwise: bool) types.Surface {
+    return switch (surface) {
+        .floor => if (clockwise) .left_wall else .right_wall,
+        .left_wall => if (clockwise) .ceiling else .floor,
+        .ceiling => if (clockwise) .right_wall else .left_wall,
+        .right_wall => if (clockwise) .floor else .ceiling,
+    };
+}
+
+// Which two buttons steer this surface's travel direction -- the other two
+// arrow buttons do nothing, since travel only ever runs along one axis.
+fn steerButtons(surface: types.Surface) struct { cw: u8, ccw: u8 } {
+    return switch (surface) {
+        .floor => .{ .cw = w4.BUTTON_LEFT, .ccw = w4.BUTTON_RIGHT },
+        .ceiling => .{ .cw = w4.BUTTON_RIGHT, .ccw = w4.BUTTON_LEFT },
+        .left_wall => .{ .cw = w4.BUTTON_UP, .ccw = w4.BUTTON_DOWN },
+        .right_wall => .{ .cw = w4.BUTTON_DOWN, .ccw = w4.BUTTON_UP },
+    };
+}
+
 pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
-    const was_on_ground = self.on_ground;
-    // Stunned: knockback still bleeds off via friction, but no input is read
-    // at all -- movement, jumping, and swinging all wait for it to expire.
     const stunned = self.hit_stun_timer > 0;
-    var moving_left = false;
-    var moving_right = false;
-    if (!stunned) {
-        moving_left = input.held(gamepad, w4.BUTTON_LEFT);
-        moving_right = input.held(gamepad, w4.BUTTON_RIGHT);
-        if (moving_left) {
-            self.vel_x -= MOVE_ACCEL;
-            self.facing_right = false;
-        } else if (moving_right) {
-            self.vel_x += MOVE_ACCEL;
-            self.facing_right = true;
+    const surface_before = self.surface;
+
+    if (surface_before) |surface| {
+        if (!stunned) {
+            const buttons = steerButtons(surface);
+            if (input.held(gamepad, buttons.cw)) self.clockwise = true;
+            if (input.held(gamepad, buttons.ccw)) self.clockwise = false;
+        }
+        const travel = FORWARD_SPEED * travelSign(surface, self.clockwise);
+        const grip = GRIP_SPEED * gripSign(surface);
+        if (gripAxisIsX(surface)) {
+            self.vel_x = grip;
+            self.vel_y = travel;
         } else {
-            self.vel_x *= FRICTION;
+            self.vel_x = travel;
+            self.vel_y = grip;
+        }
+        if (!gripAxisIsX(surface)) self.facing_right = travel > 0;
+
+        // Leaps away from the surface (local "up"), carrying travel speed
+        // into the arc -- one button for every surface, ground jump included.
+        if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
+            const leap = -gripSign(surface) * LEAP_SPEED;
+            if (gripAxisIsX(surface)) {
+                self.vel_x = leap;
+                self.vel_y = travel;
+            } else {
+                self.vel_x = travel;
+                self.vel_y = leap;
+            }
+            self.surface = null;
         }
     } else {
-        self.vel_x *= FRICTION;
-    }
-    self.vel_x = std.math.clamp(self.vel_x, -MOVE_MAX_SPEED, MOVE_MAX_SPEED);
-
-    gravity.apply(&self.vel_y, self.on_ground);
-    // Clinging to a wall slows a fall to a controlled slide, same idea as
-    // on_ground gating gravity.apply above -- capped, never sped up.
-    if (self.wall_side != 0 and self.vel_y > 0) gravity.applyWallSlide(&self.vel_y);
-
-    // One button, three meanings: a ground jump, a wall jump when clinging,
-    // or -- the fallback for any other airborne press -- the swirl attack.
-    if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
-        if (self.on_ground) {
-            self.vel_y = JUMP_VELOCITY;
-        } else if (self.wall_side != 0) {
-            self.vel_y = JUMP_VELOCITY;
-            self.vel_x = -@as(f32, @floatFromInt(self.wall_side)) * WALL_JUMP_PUSH;
-            self.facing_right = self.wall_side < 0;
-            self.wall_side = 0;
-        } else {
+        gravity.apply(&self.vel_y, false);
+        if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
             self.swing_timer = types.SWING_FRAMES;
         }
     }
 
+    const vel_x_before_collision = self.vel_x;
     const tiles = collision.TileQuery{ .tile_size = room_types.TILE_SIZE, .isSolid = &room_types.isSolid };
     const result = collision.moveAndCollide(&self.x, &self.y, types.WIDTH, types.HEIGHT, &self.vel_x, &self.vel_y, tiles);
-    self.on_ground = result.on_ground;
-    if (!was_on_ground and self.on_ground) self.squash_timer = SQUASH_FRAMES;
-    if (self.squash_timer > 0) self.squash_timer -= 1;
 
-    // Only "clinging" while airborne and still pressing into the wall that
-    // stopped you -- brushing past one on the ground doesn't count.
-    self.wall_side = if (!self.on_ground and result.hit_wall and (moving_left or moving_right))
-        (if (moving_left) @as(i8, -1) else 1)
-    else
-        0;
+    if (surface_before != null and self.surface != null) {
+        // Still riding the surface we started the frame on (didn't just
+        // leap) -- see if travel reached its end (a corner) or grip broke.
+        const surface = surface_before.?;
+        // hit_wall alone is already direction-symmetric; on_ground/hit_ceiling
+        // together give the same for y, since neither alone covers both ways.
+        const x_blocked = result.hit_wall;
+        const y_blocked = result.on_ground or result.hit_ceiling;
+        const travel_blocked = if (gripAxisIsX(surface)) y_blocked else x_blocked;
+        const grip_intact = if (gripAxisIsX(surface)) x_blocked else y_blocked;
+        if (travel_blocked) {
+            self.surface = nextSurface(surface, self.clockwise);
+        } else if (!grip_intact) {
+            self.surface = null; // drove off the edge -- fall until something catches it
+        }
+    } else if (self.surface == null) {
+        // Airborne (leaping or falling) -- landing on anything reattaches,
+        // the side it lands on deciding which surface.
+        if (result.on_ground) {
+            self.surface = .floor;
+        } else if (result.hit_wall) {
+            self.surface = if (vel_x_before_collision > 0) .right_wall else if (vel_x_before_collision < 0) .left_wall else null;
+        }
+    }
+
+    if (surface_before == null and self.surface != null) self.squash_timer = SQUASH_FRAMES;
+    if (self.squash_timer > 0) self.squash_timer -= 1;
+    if (self.surface != null) self.drive_anim +%= 1;
 
     if (self.swing_timer > 0) self.swing_timer -= 1;
-
     if (self.invuln_timer > 0) self.invuln_timer -= 1;
     if (self.hit_stun_timer > 0) self.hit_stun_timer -= 1;
 }
 
-// Applies contact damage and knockback, and starts hit stun. A no-op
-// while still invulnerable from a previous hit.
+// Applies contact damage and knockback, knocks the character airborne, and
+// starts hit stun. A no-op while still invulnerable from a previous hit.
 pub fn takeDamage(self: *types.Character, amount: i32, from_x: f32) void {
     if (self.invuln_timer > 0) return;
     self.hp = @max(0, self.hp - amount);
     self.vel_x = if (self.x < from_x) -DAMAGE_KNOCKBACK else DAMAGE_KNOCKBACK;
     self.vel_y = -1.5;
+    self.surface = null;
     self.invuln_timer = INVULN_FRAMES;
     self.hit_stun_timer = HIT_STUN_FRAMES;
 }
 
 const testing = std.testing;
 
-test "update moves right on BUTTON_RIGHT and faces that direction" {
+test "on the floor, the tank drives left with no input at all -- it never idles" {
     room_types.active = .{};
-    room_types.active.tiles[10][5] = .ground; // floor beneath the character
-    var c = types.Character{ .x = 32, .y = 72 };
-    update(&c, w4.BUTTON_RIGHT, 0);
-    try testing.expect(c.vel_x > 0);
-    try testing.expect(c.facing_right);
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true };
+    const start_x = c.x;
+    update(&c, 0, 0);
+    try testing.expect(c.x < start_x);
+    try testing.expectEqual(types.Surface.floor, c.surface.?);
 }
 
-test "update only allows a jump while on_ground" {
+test "steering the opposite way reverses travel direction" {
     room_types.active = .{};
-    var c = types.Character{ .x = 32, .y = 80, .on_ground = false };
-    update(&c, w4.BUTTON_1, 0);
-    try testing.expect(c.vel_y != JUMP_VELOCITY);
-
-    c = types.Character{ .x = 32, .y = 80, .on_ground = true };
-    update(&c, w4.BUTTON_1, 0);
-    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true };
+    update(&c, w4.BUTTON_RIGHT, 0); // ccw button on the floor -- reverses it
+    try testing.expect(!c.clockwise);
+    const x_after_reverse = c.x;
+    update(&c, 0, 0);
+    try testing.expect(c.x > x_after_reverse);
 }
 
-test "takeDamage reduces hp, applies knockback, and starts invulnerability and hit stun" {
-    var c = types.Character{ .x = 20, .hp = types.BASE_MAX_HP };
+test "the jump button leaps off the current surface, and a second press mid-air swirls" {
+    room_types.active = .{};
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor };
+    update(&c, w4.BUTTON_1, 0);
+    try testing.expect(c.surface == null);
+    try testing.expect(c.vel_y < 0); // leapt upward, away from the floor
+
+    update(&c, w4.BUTTON_1, 0);
+    try testing.expect(c.swing_timer > 0);
+}
+
+test "landing back on a surface starts the squash timer" {
+    room_types.active = .{};
+    room_types.active.tiles[10][6] = .ground;
+    var c = types.Character{ .x = 30, .y = 42, .surface = null, .vel_y = 10 };
+    update(&c, 0, 0);
+    try testing.expectEqual(types.Surface.floor, c.surface.?);
+    try testing.expect(c.squash_timer > 0);
+}
+
+test "hit stun suppresses steering until it expires" {
+    room_types.active = .{};
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true, .hit_stun_timer = 1 };
+    update(&c, w4.BUTTON_RIGHT, 0); // still stunned this frame -- steering ignored
+    try testing.expect(c.clockwise);
+    try testing.expectEqual(@as(u16, 0), c.hit_stun_timer);
+
+    update(&c, w4.BUTTON_RIGHT, 0); // stun has expired -- steering works now
+    try testing.expect(!c.clockwise);
+}
+
+test "takeDamage knocks the character airborne, applies knockback, and starts invuln/stun" {
+    var c = types.Character{ .x = 20, .hp = types.BASE_MAX_HP, .surface = .floor };
     takeDamage(&c, 1, 30); // hazard to the right -> knocked left
     try testing.expectEqual(types.BASE_MAX_HP - 1, c.hp);
     try testing.expect(c.vel_x < 0);
+    try testing.expect(c.surface == null);
     try testing.expect(c.invuln_timer > 0);
     try testing.expect(c.hit_stun_timer > 0);
-}
-
-test "hit stun suppresses movement and jump input until it expires" {
-    room_types.active = .{};
-    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground; // a floor to stay grounded on
-    var c = types.Character{ .x = 32, .y = 50 - types.HEIGHT, .on_ground = true, .hit_stun_timer = 1 };
-    update(&c, w4.BUTTON_RIGHT | w4.BUTTON_1, 0); // still stunned this frame -> input ignored
-    try testing.expectEqual(@as(f32, 0), c.vel_x); // no acceleration, and friction already zeroed it
-    try testing.expect(c.vel_y != JUMP_VELOCITY);
-    try testing.expectEqual(@as(u16, 0), c.hit_stun_timer);
-
-    update(&c, w4.BUTTON_RIGHT | w4.BUTTON_1, 0); // stun has expired -> input works again
-    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
 }
 
 test "takeDamage is a no-op while invulnerable" {
@@ -143,70 +230,38 @@ test "takeDamage is a no-op while invulnerable" {
     try testing.expectEqual(types.BASE_MAX_HP, c.hp);
 }
 
-test "pressing into a wall while airborne registers wall_side and slides slower" {
+test "driving clockwise crawls the whole inside perimeter: floor -> wall -> ceiling -> wall -> floor" {
     room_types.active = .{};
-    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall; // a wall just to the right
-    var c = types.Character{ .x = 42, .y = 40, .on_ground = false, .vel_y = 10 };
-    update(&c, w4.BUTTON_RIGHT, 0); // first contact this frame -- registers wall_side
-    try testing.expectEqual(@as(i8, 1), c.wall_side);
+    for (6..15) |tx| room_types.active.tiles[20][tx] = .ground; // floor
+    for (5..21) |ty| room_types.active.tiles[ty][5] = .wall; // left wall
+    for (5..21) |ty| room_types.active.tiles[ty][15] = .wall; // right wall
+    for (6..15) |tx| room_types.active.tiles[5][tx] = .wall; // ceiling
 
-    update(&c, w4.BUTTON_RIGHT, 0); // now clinging -- gravity gets capped to the slide speed
-    try testing.expectEqual(gravity.WALL_SLIDE_SPEED, c.vel_y);
-}
-
-test "jumping while clinging to a wall kicks off it and away" {
-    room_types.active = .{};
-    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall;
-    var c = types.Character{ .x = 42, .y = 40, .on_ground = false, .wall_side = 1 };
-    update(&c, w4.BUTTON_1, 0);
-
-    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
-    try testing.expect(c.vel_x < 0); // wall was on the right -> kicked left
-    try testing.expect(!c.facing_right); // now facing the direction it's kicking off toward
-    try testing.expectEqual(@as(i8, 0), c.wall_side);
-}
-
-test "wall_side clears the instant the character lands" {
-    room_types.active = .{};
-    var c = types.Character{ .wall_side = 1, .on_ground = true, .vel_y = 0 };
-    update(&c, w4.BUTTON_RIGHT, 0);
-    try testing.expectEqual(@as(i8, 0), c.wall_side);
-}
-
-test "landing on the ground from the air starts the squash timer" {
-    room_types.active = .{};
-    room_types.active.tiles[10][6] = .ground; // a floor to land on
-    var c = types.Character{ .x = 30, .y = 42, .on_ground = false, .vel_y = 10 };
-    update(&c, 0, 0);
-    try testing.expect(c.squash_timer > 0);
-}
-
-test "the squash timer counts down and does not retrigger while already grounded" {
-    room_types.active = .{};
-    var c = types.Character{ .on_ground = true, .squash_timer = 2 };
-    update(&c, 0, 0);
-    try testing.expectEqual(@as(u8, 1), c.squash_timer);
-}
-
-test "the jump button starts a swirl attack in the air, but still just jumps on the ground" {
-    room_types.active = .{};
-    var airborne = types.Character{ .x = 32, .y = 40, .on_ground = false };
-    update(&airborne, w4.BUTTON_1, 0);
-    try testing.expect(airborne.swing_timer > 0);
-    try testing.expect(airborne.vel_y != JUMP_VELOCITY);
-
-    room_types.active.tiles[10][6] = .ground; // a floor, so "grounded" actually stays grounded
-    var grounded = types.Character{ .x = 32, .y = 40, .on_ground = true };
-    update(&grounded, w4.BUTTON_1, 0);
-    try testing.expectEqual(JUMP_VELOCITY, grounded.vel_y);
-    try testing.expectEqual(@as(u8, 0), grounded.swing_timer);
-}
-
-test "clinging to a wall still wall-jumps instead of swirling" {
-    room_types.active = .{};
-    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][10] = .wall;
-    var c = types.Character{ .x = 42, .y = 40, .on_ground = false, .wall_side = 1 };
-    update(&c, w4.BUTTON_1, 0);
-    try testing.expectEqual(JUMP_VELOCITY, c.vel_y);
-    try testing.expectEqual(@as(u8, 0), c.swing_timer);
+    var c = types.Character{
+        .x = 10 * room_types.TILE_SIZE,
+        .y = 20 * room_types.TILE_SIZE - types.HEIGHT,
+        .surface = .floor,
+        .clockwise = true,
+    };
+    var seen_left_wall = false;
+    var seen_ceiling = false;
+    var seen_right_wall = false;
+    var back_to_floor = false;
+    var i: u32 = 0;
+    while (i < 400) : (i += 1) {
+        update(&c, 0, 0);
+        if (c.surface) |s| switch (s) {
+            .left_wall => seen_left_wall = true,
+            .ceiling => seen_ceiling = true,
+            .right_wall => seen_right_wall = true,
+            .floor => if (seen_right_wall) {
+                back_to_floor = true;
+            },
+        };
+        if (back_to_floor) break;
+    }
+    try testing.expect(seen_left_wall);
+    try testing.expect(seen_ceiling);
+    try testing.expect(seen_right_wall);
+    try testing.expect(back_to_floor);
 }

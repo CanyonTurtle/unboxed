@@ -1,9 +1,10 @@
 # unboxed
 
 A procedurally-generated roguelike-platformer for the [WASM-4](https://wasm4.org) fantasy console,
-written in Zig. Move, jump, break pots, collect items, and clear each room of enemies to move on
-through one of its doors into a fresh room further down the line, picking up permanent powerups
-along the way.
+written in Zig. You play a tank that never stops moving, auto-driving along whatever surface it
+grips -- floor, wall, or ceiling -- steerable only to turn around. Break pots, collect items, and
+clear each room of enemies to move on through one of its doors into a fresh room further down the
+line, picking up permanent powerups along the way.
 
 This repo is also a from-scratch reboot of an earlier platformer's architecture -- see
 [CLAUDE.md](CLAUDE.md) for the organizing ideas (locality-based folders, assets defined in code,
@@ -65,14 +66,17 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 
 ## How to play
 
-**Arrow keys** move, **X** jumps. Jumping into a wall and holding toward it slides you down slowly
-instead of falling -- press **X** again to wall-jump off it, up and away. Press **X** again while
-already airborne and not against a wall, and instead of another jump you swing a midair swirl
-attack -- one button, two jobs depending on whether your feet are on the ground. Walk into a pot to
-break it -- it may reveal a coin (score) or a heart (heals), with a little burst of particles. Three
-enemy kinds patrol -- walkers along the ground, creepers up and down a wall, flies back and forth
-through open air -- and the swirl is the only way to defeat one, hitting every side at once; touching
-an enemy any other way, jumping on top included, just hits you back and briefly stuns you.
+The tank never sits still: it's always driving forward along whatever surface it grips, at a
+constant speed. **Arrow keys** don't move it directly -- they steer, reversing which way it drives
+(only the two keys along its current surface's direction do anything: left/right on the floor or
+ceiling, up/down on a wall). Drive it into the end of a floor or ceiling and it corners onto the
+next wall automatically, crawling all the way around a room's inside perimeter if left unsteered.
+**X** leaps off whatever it's gripping, arcing briefly through the air before landing (and
+re-gripping) somewhere new -- press **X** again mid-air instead for a midair swirl attack, hitting
+every side at once. Driving into a pot breaks it -- it may reveal a coin (score) or a heart (heals),
+with a little burst of particles. Three enemy kinds patrol -- walkers along the ground, creepers up
+and down a wall, flies back and forth through open air -- and the swirl is the only way to defeat
+one; touching an enemy any other way just hits you back and briefly stuns you.
 
 Every room starts with its doors shut -- clearing every enemy in it (the first room has none, so
 it's already clear) reveals its powerup and opens a door on each side that isn't the one you came

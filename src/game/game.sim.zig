@@ -192,7 +192,7 @@ test "a midair sword swing defeats an enemy on contact" {
     newRun();
     clearField();
     enemy_types.enemies[0] = .{ .kind = .walker, .x = 50, .y = 40, .alive = true };
-    char_types.player = .{ .x = 40, .y = 40, .facing_right = true, .swing_timer = 5, .on_ground = false };
+    char_types.player = .{ .x = 40, .y = 40, .facing_right = true, .swing_timer = 5, .surface = null };
 
     update(0);
 
@@ -204,7 +204,7 @@ test "defeating an enemy spawns particles" {
     clearField();
     particle_sim.clear();
     enemy_types.enemies[0] = .{ .x = 40, .y = 40, .alive = true };
-    char_types.player = .{ .x = 40, .y = 40, .swing_timer = 5, .on_ground = false };
+    char_types.player = .{ .x = 40, .y = 40, .swing_timer = 5, .surface = null };
 
     update(0);
 

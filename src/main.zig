@@ -19,6 +19,7 @@ comptime {
         @export(&debug.getRoomIndex, .{ .name = "debugGetRoomIndex" });
         @export(&debug.getTransitionActive, .{ .name = "debugGetTransitionActive" });
         @export(&debug.getTransitionFrame, .{ .name = "debugGetTransitionFrame" });
+        @export(&debug.getSurface, .{ .name = "debugGetSurface" });
     }
 }
 

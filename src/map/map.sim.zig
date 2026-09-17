@@ -170,7 +170,7 @@ fn finishTransition(player: *char_types.Character) void {
     player.y = t.end_y;
     player.vel_x = 0;
     player.vel_y = 0;
-    player.on_ground = false;
+    player.surface = null;
     map_types.transition = .{};
 }
 

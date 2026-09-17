@@ -1,5 +1,5 @@
-// Draws the player character (squash on landing, rise/peak/fall in the
-// air) and, while swinging, a curved arc of blocks sweeping around them.
+// Draws the player: rolling treads while gripping a surface, rise/peak/fall
+// while airborne mid-leap, squash on landing, an arc while swinging.
 
 const std = @import("std");
 const w4 = @import("../wasm4.zig");
@@ -15,9 +15,9 @@ const SWIRL_SAMPLES: u32 = 14;
 // band reads as "hanging near the peak", outside as rising or falling.
 const PEAK_BAND: f32 = 1.0;
 
-// Drawn as if facing right (mirrored -- draw()'s flip_x -- when facing
-// left): a single eye toward the front, plus a forward arm/leg leading a trailing back one.
-const IDLE_SPRITE = sprite_mod.fromArt(&.{
+// Drawn facing right (mirrored when facing left): a single eye toward the
+// front, atop a tread band. Two frames, hash-offset, alternate via drive_anim.
+const TREAD_A = sprite_mod.fromArt(&.{
     "..####..",
     ".######.",
     ".####.#.",
@@ -26,9 +26,23 @@ const IDLE_SPRITE = sprite_mod.fromArt(&.{
     "..######",
     ".######.",
     "..####..",
-    ".#....#.",
-    "..#..##.",
-    "..#...##",
+    "########",
+    "#.#.#.#.",
+    "########",
+});
+
+const TREAD_B = sprite_mod.fromArt(&.{
+    "..####..",
+    ".######.",
+    ".####.#.",
+    "..####..",
+    ".#######",
+    "..######",
+    ".######.",
+    "..####..",
+    "########",
+    ".#.#.#.#",
+    "########",
 });
 
 const SQUASH_SPRITE = sprite_mod.fromArt(&.{
@@ -116,14 +130,18 @@ fn swirlDiameter(t: f32) f32 {
     return SWIRL_MIN_DIAM + @sin(t * std.math.pi) * (SWIRL_MAX_DIAM - SWIRL_MIN_DIAM);
 }
 
+// How many frames each tread pose holds before alternating to the other --
+// slower reads as "rolling", not flickering.
+const TREAD_ALTERNATE_FRAMES: u16 = 6;
+
 fn pickSprite(char: types.Character) *const sprite_mod.Sprite {
     if (char.squash_timer > 0) return &SQUASH_SPRITE;
-    if (!char.on_ground) {
+    if (char.surface == null) {
         if (char.vel_y < -PEAK_BAND) return &RISE_SPRITE;
         if (char.vel_y > PEAK_BAND) return &FALL_SPRITE;
         return &PEAK_SPRITE;
     }
-    return &IDLE_SPRITE;
+    return if ((char.drive_anim / TREAD_ALTERNATE_FRAMES) % 2 == 0) &TREAD_A else &TREAD_B;
 }
 
 pub fn draw(char: types.Character) void {

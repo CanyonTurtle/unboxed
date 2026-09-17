@@ -11,6 +11,9 @@ const PLATFORM_MAX_WIDTH = 6;
 // Tile rows kept clear above the floor -- fewer would leave a gap shorter
 // than the 8px character, sealing the floor (and its doors) off entirely.
 const FLOOR_CLEARANCE_ROWS = 3;
+// Tile columns kept clear next to each side wall, floor to ceiling -- the
+// character's wall-crawl path, wide enough for its ~8px-wide body.
+const WALL_CLEARANCE_COLS = 2;
 
 // Border walls, a solid ground floor one row up from the bottom, and a
 // random handful of floating platforms at varied heights/widths/counts.
@@ -29,12 +32,12 @@ pub fn generate(room: *types.Room, rng: *rng_mod.Rng) void {
     var i: u32 = 0;
     while (i < platform_count) : (i += 1) {
         const py = rng.between(4, floor_y - FLOOR_CLEARANCE_ROWS - 1);
-        const px = rng.between(2, types.GRID_W - 6);
+        const px = rng.between(1 + WALL_CLEARANCE_COLS, types.GRID_W - 1 - WALL_CLEARANCE_COLS - PLATFORM_MAX_WIDTH);
         const width = rng.between(PLATFORM_MIN_WIDTH, PLATFORM_MAX_WIDTH);
         var w: u32 = 0;
         while (w < width) : (w += 1) {
             const tx = px + w;
-            if (tx < types.GRID_W - 1) room.tiles[py][tx] = .ground;
+            if (tx < types.GRID_W - 1 - WALL_CLEARANCE_COLS) room.tiles[py][tx] = .ground;
         }
     }
 }
@@ -98,6 +101,24 @@ test "generate never places a platform close enough to seal off the floor" {
         while (ty < types.FLOOR_ROW) : (ty += 1) {
             for (1..types.GRID_W - 1) |tx| {
                 try testing.expect(room.tiles[ty][tx] == .empty);
+            }
+        }
+    }
+}
+
+test "generate keeps both side walls' crawl columns clear, floor to ceiling" {
+    const testing = @import("std").testing;
+    var seed: u32 = 0;
+    while (seed < 30) : (seed += 1) {
+        var room: types.Room = .{};
+        var rng = rng_mod.Rng{ .state = seed };
+        generate(&room, &rng);
+        var ty: u32 = 1;
+        while (ty < types.FLOOR_ROW) : (ty += 1) {
+            var col: u32 = 0;
+            while (col < WALL_CLEARANCE_COLS) : (col += 1) {
+                try testing.expect(room.tiles[ty][1 + col] == .empty);
+                try testing.expect(room.tiles[ty][types.GRID_W - 2 - col] == .empty);
             }
         }
     }
