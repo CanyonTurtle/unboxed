@@ -347,6 +347,7 @@ async function loadCart(wasmPath) {
     getTransitionActive: () => e.debugGetTransitionActive() !== 0,
     getTransitionFrame: () => e.debugGetTransitionFrame(),
     getSurface: () => e.debugGetSurface(),
+    getKeyCollected: () => e.debugGetKeyCollected() !== 0,
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

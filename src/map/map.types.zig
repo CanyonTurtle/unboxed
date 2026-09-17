@@ -6,6 +6,7 @@ const pot_types = @import("../pot/pot.types.zig");
 const item_types = @import("../item/item.types.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
+const key_types = @import("../key/key.types.zig");
 
 pub const RoomSave = struct {
     room: room_types.Room = .{},
@@ -13,6 +14,7 @@ pub const RoomSave = struct {
     items: [item_types.MAX_COUNT]item_types.Item = [_]item_types.Item{.{}} ** item_types.MAX_COUNT,
     enemies: [enemy_types.MAX_COUNT]enemy_types.Enemy = [_]enemy_types.Enemy{.{}} ** enemy_types.MAX_COUNT,
     powerup: powerup_types.Powerup = .{},
+    key: key_types.Key = .{},
 };
 
 pub var current: RoomSave = .{};

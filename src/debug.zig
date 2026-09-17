@@ -3,6 +3,7 @@
 
 const char_types = @import("character/character.types.zig");
 const map_types = @import("map/map.types.zig");
+const key_types = @import("key/key.types.zig");
 const state = @import("game/game.types.zig");
 
 pub fn getHp() callconv(.c) i32 {
@@ -46,5 +47,9 @@ pub fn getSurface() callconv(.c) u32 {
         .left_wall => 2,
         .right_wall => 3,
     };
+}
+
+pub fn getKeyCollected() callconv(.c) u32 {
+    return @intFromBool(key_types.active.collected);
 }
 

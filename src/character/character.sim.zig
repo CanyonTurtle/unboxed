@@ -1,10 +1,9 @@
-// Character movement: one button. Hold to rev up (Character.speed); a
-// tap below TURN_THRESHOLD turns around, a real hold launches on release.
+// Character movement: one button, no gravity. Hold to rev up (Character.
+// speed); a tap turns around, a real hold launches a straight-line float on release.
 
 const std = @import("std");
 const w4 = @import("../wasm4.zig");
 const input = @import("../core/core.input.zig");
-const gravity = @import("../core/core.gravity.zig");
 const collision = @import("../core/core.collision.zig");
 const room_types = @import("../room/room.types.zig");
 const types = @import("character.types.zig");
@@ -116,17 +115,13 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
                 // Whichever way it's now actually moving horizontally, face
                 // that way -- otherwise a wall leap can land facing backwards.
                 self.facing_right = self.vel_x > 0;
-                self.swing_timer = types.SWING_FRAMES;
                 self.surface = null;
             }
             self.speed = 0;
         }
-    } else {
-        gravity.apply(&self.vel_y, false);
-        if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
-            self.swing_timer = types.SWING_FRAMES;
-        }
     }
+    // No else, no gravity: while airborne, vel_x/vel_y are left exactly as
+    // the leap set them -- a straight float until it runs into something.
 
     const vel_x_before_collision = self.vel_x;
     const vel_y_before_collision = self.vel_y;
@@ -166,7 +161,6 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     if (self.squash_timer > 0) self.squash_timer -= 1;
     if (self.surface != null) self.drive_anim +%= 1;
 
-    if (self.swing_timer > 0) self.swing_timer -= 1;
     if (self.invuln_timer > 0) self.invuln_timer -= 1;
     if (self.hit_stun_timer > 0) self.hit_stun_timer -= 1;
 }
@@ -216,10 +210,9 @@ test "a quick tap below the charge threshold just turns the tank around" {
     try testing.expectEqual(types.Surface.floor, c.surface.?); // no leap -- still gripped
     try testing.expect(!c.clockwise); // turned around instead
     try testing.expectEqual(@as(f32, 0), c.speed);
-    try testing.expectEqual(@as(u8, 0), c.swing_timer); // a turn isn't an attack
 }
 
-test "releasing after real charge leaps off the surface and throws a swirl combo" {
+test "releasing after real charge leaps off the surface and floats away" {
     room_types.active = .{};
     for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
     var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true };
@@ -228,39 +221,48 @@ test "releasing after real charge leaps off the surface and throws a swirl combo
     update(&c, 0, w4.BUTTON_1); // release
     try testing.expect(c.surface == null);
     try testing.expect(c.vel_y < 0); // leapt upward, away from the floor
-    try testing.expect(c.swing_timer > 0);
     try testing.expectEqual(@as(f32, 0), c.speed);
+
+    const vy = c.vel_y;
+    update(&c, 0, 0); // airborne, no input -- no gravity means vel_y is untouched
+    try testing.expectEqual(vy, c.vel_y);
 }
 
-test "the button still throws an extra swirl manually while airborne" {
-    var c = types.Character{ .x = 60, .y = 40, .surface = null, .vel_y = -2 };
-    update(&c, w4.BUTTON_1, 0);
-    try testing.expect(c.swing_timer > 0);
-}
-
-test "releasing while climbing a wall leaps away, and lands sitting still" {
+test "releasing while climbing a wall floats away in a straight line and eventually lands" {
     room_types.active = .{};
-    for (5..21) |ty| room_types.active.tiles[ty][5] = .wall; // a wall to climb
-    for (6..15) |tx| room_types.active.tiles[20][tx] = .ground; // floor below to land on
+    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][5] = .wall; // left wall, full height
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[20][tx] = .ground; // full floor row
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[3][tx] = .wall; // ceiling
+    for (0..room_types.GRID_H) |ty| room_types.active.tiles[ty][25] = .wall; // right wall
 
-    // Climbing up the wall (clockwise on left_wall); releasing pushes it
-    // right, away from the wall (+x), regardless of `clockwise`.
-    var c = types.Character{ .x = 30, .y = 60, .surface = .left_wall, .clockwise = true };
+    var c = types.Character{ .x = 30, .y = 40, .surface = .left_wall, .clockwise = false }; // climbing down
     var i: u32 = 0;
     while (i < 15) : (i += 1) update(&c, w4.BUTTON_1, 0); // hold to build real charge
     try testing.expect(c.speed > 0);
 
     update(&c, 0, w4.BUTTON_1); // release
     try testing.expect(c.surface == null);
-    try testing.expect(c.vel_x > 0);
-    try testing.expect(c.swing_timer > 0);
+    try testing.expect(c.vel_x > 0); // away from the wall
     try testing.expectEqual(@as(f32, 0), c.speed);
 
+    const vy = c.vel_y;
     i = 0;
-    while (i < 60 and c.surface == null) : (i += 1) update(&c, 0, 0);
-    try testing.expectEqual(types.Surface.floor, c.surface.?);
-    try testing.expect(!c.clockwise); // resynced to the rightward flight, not the old upward climb
+    while (i < 200 and c.surface == null) : (i += 1) {
+        try testing.expectEqual(vy, c.vel_y); // no gravity -- a straight float, not an arc
+        update(&c, 0, 0);
+    }
+    try testing.expect(c.surface != null); // it eventually runs into the enclosing room
     try testing.expectEqual(@as(f32, 0), c.speed); // sits still until steered again
+}
+
+test "landing while drifting resyncs clockwise to match the actual drift direction" {
+    room_types.active = .{};
+    for (1..31) |tx| room_types.active.tiles[10][tx] = .ground; // a full floor row, well below the start
+    var c = types.Character{ .x = 40, .y = 30, .surface = null, .vel_x = -1.5, .vel_y = 0.6, .clockwise = false };
+    var i: u32 = 0;
+    while (i < 30 and c.surface == null) : (i += 1) update(&c, 0, 0);
+    try testing.expectEqual(types.Surface.floor, c.surface.?);
+    try testing.expect(c.clockwise); // drifting left = clockwise on the floor, regardless of the old value
 }
 
 test "landing back on a surface starts the squash timer" {

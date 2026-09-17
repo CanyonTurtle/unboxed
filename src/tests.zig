@@ -7,7 +7,6 @@ test {
     _ = @import("core/core.input.zig");
     _ = @import("core/core.rng.zig");
     _ = @import("core/core.camera.zig");
-    _ = @import("core/core.curve.zig");
 
     _ = @import("room/room.types.zig");
     _ = @import("room/room.sim.zig");
@@ -18,6 +17,7 @@ test {
     _ = @import("item/item.sim.zig");
     _ = @import("enemy/enemy.sim.zig");
     _ = @import("powerup/powerup.sim.zig");
+    _ = @import("key/key.sim.zig");
     _ = @import("particle/particle.sim.zig");
 
     _ = @import("map/map.types.zig");

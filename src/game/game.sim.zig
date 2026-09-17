@@ -14,6 +14,8 @@ const enemy_types = @import("../enemy/enemy.types.zig");
 const enemy_sim = @import("../enemy/enemy.sim.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
 const powerup_sim = @import("../powerup/powerup.sim.zig");
+const key_types = @import("../key/key.types.zig");
+const key_sim = @import("../key/key.sim.zig");
 const particle_types = @import("../particle/particle.types.zig");
 const particle_sim = @import("../particle/particle.sim.zig");
 const map_types = @import("../map/map.types.zig");
@@ -96,21 +98,15 @@ pub fn update(gamepad: u8) void {
             .none => {},
             .hit_player => |amount| char_sim.takeDamage(&char_types.player, amount, enemy.x),
         }
-        // The only way to defeat an enemy: the midair swirl attack, checked
-        // separately since its hitbox is the character's, not the enemy's, to know about.
-        if (enemy.alive) {
-            if (char_types.player.swingHitbox()) |sword| {
-                if (enemy.aabb().overlaps(sword)) {
-                    enemy.alive = false;
-                    particle_sim.spawnBurst(enemy.x, enemy.y);
-                }
-            }
-        }
     }
 
     switch (powerup_sim.update(&powerup_types.active, char_types.player.aabb())) {
         .none => {},
         .collected => |kind| grantPowerup(kind),
+    }
+
+    if (key_sim.update(&key_types.active, char_types.player.aabb()) == .collected) {
+        particle_sim.spawnBurst(key_types.active.x, key_types.active.y);
     }
 
     particle_sim.update();
@@ -130,7 +126,7 @@ test "newRun resets hp/score/upgrades and starts a fresh room" {
     try testing.expectEqual(@as(u32, 0), map_types.room_index);
 }
 
-// Clears every pot/enemy/item/powerup, and the room's own generated
+// Clears every pot/enemy/item/powerup/key, and the room's own generated
 // terrain, so a test's hardcoded position can never collide with either.
 fn clearField() void {
     room_types.active = .{};
@@ -138,6 +134,7 @@ fn clearField() void {
     for (&enemy_types.enemies) |*e| e.* = .{ .alive = false };
     for (&item_types.items) |*it| it.* = .{};
     powerup_types.active = .{};
+    key_types.active = .{};
 }
 
 test "breaking a pot reveals an item that the player immediately picks up" {
@@ -188,29 +185,31 @@ test "player hp reaching zero ends the run" {
     try testing.expect(state.game.game_over);
 }
 
-test "a midair sword swing defeats an enemy on contact" {
-    newRun();
-    clearField();
-    enemy_types.enemies[0] = .{ .kind = .walker, .x = 50, .y = 40, .alive = true };
-    char_types.player = .{ .x = 40, .y = 40, .facing_right = true, .swing_timer = 5, .surface = null };
-
-    update(0);
-
-    try testing.expect(!enemy_types.enemies[0].alive);
-}
-
-test "defeating an enemy spawns particles" {
+test "collecting the room's key marks it collected and spawns particles" {
     newRun();
     clearField();
     particle_sim.clear();
-    enemy_types.enemies[0] = .{ .x = 40, .y = 40, .alive = true };
-    char_types.player = .{ .x = 40, .y = 40, .swing_timer = 5, .surface = null };
+    key_types.active = .{ .x = 40, .y = 40, .placed = true };
+    char_types.player = .{ .x = 40, .y = 40 };
 
     update(0);
 
+    try testing.expect(key_types.active.collected);
     var live: u32 = 0;
     for (particle_types.particles) |p| {
         if (p.life > 0) live += 1;
     }
     try testing.expect(live > 0);
+}
+
+test "touching an enemy hits the player back -- there's no way to defeat one" {
+    newRun();
+    clearField();
+    enemy_types.enemies[0] = .{ .kind = .walker, .x = 40, .y = 40, .alive = true };
+    char_types.player = .{ .x = 40, .y = 40, .hp = char_types.BASE_MAX_HP };
+
+    update(0);
+
+    try testing.expect(enemy_types.enemies[0].alive);
+    try testing.expect(char_types.player.hp < char_types.BASE_MAX_HP);
 }

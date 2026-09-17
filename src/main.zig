@@ -20,6 +20,7 @@ comptime {
         @export(&debug.getTransitionActive, .{ .name = "debugGetTransitionActive" });
         @export(&debug.getTransitionFrame, .{ .name = "debugGetTransitionFrame" });
         @export(&debug.getSurface, .{ .name = "debugGetSurface" });
+        @export(&debug.getKeyCollected, .{ .name = "debugGetKeyCollected" });
     }
 }
 

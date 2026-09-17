@@ -41,7 +41,8 @@ if a file would blow the 500-line limit below, that's a sign the concept
 itself should split into two folders, not that one file should become two.
 
 Current concepts, as a reference: `character`, `pot`, `item`, `enemy`,
-`powerup` (a permanent player upgrade), `particle` (short-lived visual pops
+`powerup` (a permanent player upgrade), `key` (a room's objective --
+collecting it opens the doors), `particle` (short-lived visual pops
 -- see below), `room` (one screen's tile grid + procedural generation),
 `map` (the forward-only room progression -- see below), and `game` (the
 orchestrator tying every other concept together -- see below).
@@ -117,20 +118,22 @@ shapes even though they share one color.
 
 ## `map/`: forward-only rooms, the one locality allowed to know every entity's shape
 
-Rooms form a line, not a grid: clearing a room (every enemy dead) opens a
-door on each of its unused sides -- **left, right, and down; never up**,
-which stays real platforming, not a way out -- except the one you entered
-through, so there's never a way back. Walking into an open door starts a
-short eased camera transition (`map.types.TRANSITION_FRAMES`,
-`core.camera.easeOutQuad`) into a freshly-generated room. Because you can
-never revisit a room, **only two ever need to exist at once**:
-`map.types.current` and `map.types.next` (generated the instant you touch
-an open door, swapped in once the transition finishes). There's no
-room-graph coordinate system to store, and no per-wall toughness to tune --
-`map.types.room_index` (just a counter) is the only "how deep is this run"
-signal, driving enemy count and powerup tier in `map.sim.generateInto`.
+Rooms form a line, not a grid: clearing a room (collecting its key --
+`map.sim.isRoomCleared`, not defeating enemies) opens a door on each of its
+unused sides -- **left, right, and down; never up**, which stays real
+platforming, not a way out -- except the one you entered through, so
+there's never a way back. Walking into an open door starts a short eased
+camera transition (`map.types.TRANSITION_FRAMES`, `core.camera.
+easeOutQuad`) into a freshly-generated room. Because you can never revisit
+a room, **only two ever need to exist at once**: `map.types.current` and
+`map.types.next` (generated the instant you touch an open door, swapped in
+once the transition finishes). There's no room-graph coordinate system to
+store, and no per-wall toughness to tune -- `map.types.room_index` (just a
+counter) is the only "how deep is this run" signal, driving enemy count in
+`map.sim.generateInto` (zero at all for the first `NO_ENEMY_ROOMS`, so the
+run opens as pure dodge-free exploration before anything can hurt you).
 
-`RoomSave` persists a room's tiles *and* its pots/items/enemies/powerup, so
+`RoomSave` persists a room's tiles *and* its pots/items/enemies/powerup/key, so
 `map.types.zig` necessarily imports every persisted entity's `.types.zig`
 just to declare storage for it. This is the one deliberate exception to
 "entities don't know about each other": **if you add a new entity kind
@@ -168,11 +171,12 @@ a was-held-now-isn't edge) is the jump: it leaps the tank off its surface,
 launching along that surface's grip direction scaled by whatever `speed`
 had built up (`leap_base + speed*leap_scale` -- a light hold still hops, a
 fully-revved release launches much further; wall leaps use weaker
-`WALL_LEAP_*` constants across the board), carries the rest of that speed
-into the arc as the perpendicular component, throws the midair swirl
-attack at the same instant, and resets `speed` to 0 -- it lands sitting
-still, awaiting a fresh hold. Pressed again mid-air, the same button
-throws an *extra* swirl manually (`character.sim.update`'s `else` branch).
+`WALL_LEAP_*` constants), carries the rest of that speed into the arc as
+the perpendicular component, and resets `speed` to 0. **There is no
+gravity and no attack** -- once airborne, `vel_x`/`vel_y` are left exactly
+as the leap set them (no `else` branch touches them at all), so it floats
+in a dead-straight line until it runs into something and reattaches;
+there's nothing to dodge *with*, only rooms to dodge *through*.
 
 Each surface has a **grip axis** (the constant small push that keeps the
 tank snapped against it, standing in for gravity) and a **travel axis**
@@ -223,9 +227,9 @@ that isn't one entity's data (the RNG, `game_over`, `prev_gamepad`) lives in
 The point of this layout is that "where does X go" stops being a judgment
 call. A few common additions:
 
-**A new entity kind** (a key, a chest, a boss -- anything with its own
+**A new entity kind** (a chest, a hazard, a boss -- anything with its own
 position/behavior/sprite): copy the shape of the simplest existing entity
-(`pot` is the smallest). Concretely:
+(`pot` is the smallest; `key` is a good one-per-room reference). Concretely:
 
 1. `mkdir src/<name>` and add `<name>.types.zig` (struct + a `pub var`
    array of instances, sized by a `MAX_COUNT`), `<name>.sim.zig` (an
@@ -241,9 +245,9 @@ position/behavior/sprite): copy the shape of the simplest existing entity
 
 No existing file needs restructuring -- every step is additive.
 
-**A new variant of an existing kind** (a new item like a key, a new enemy
-type): usually just a new `enum` value plus one `switch` arm each in that
-kind's `.sim.zig` (the effect) and `.render.zig` (the sprite). See
+**A new variant of an existing kind** (a new item, a new enemy type):
+usually just a new `enum` value plus one `switch` arm each in that kind's
+`.sim.zig` (the effect) and `.render.zig` (the sprite). See
 `item.types.ItemKind` for the pattern. No new files, no new folders.
 
 **A new shared physical behavior** (knockback, a dash, swimming): put it in
@@ -302,7 +306,7 @@ a commit's run status.
 ## Look: a strict 4-color palette
 
 `main.zig`'s `PALETTE` is black (background), white (all terrain --
-floor/platforms/walls/doors, shape-only distinction), red, and yellow
+floor/walls/doors, shape-only distinction), red, and yellow
 (entities split across the two -- see each `*.render.zig`'s `DRAW_COLORS`
 comment for which). Adding a 5th "color" isn't possible on WASM-4 hardware;
 a new entity kind reuses red or yellow and leans on its sprite silhouette
@@ -311,23 +315,27 @@ terrain.
 
 ## What's actually implemented here
 
-This is a **prototype of the pattern**, not the game itself: one character
--- a tank gripping a room's floor/wall/ceiling, revving up while a
-direction is held and releasing to leap+swirl, corner-turning at a
-surface's end while held through it (see "`character/`" above), with
-rolling-tread/rise/peak/fall/squash poses (`character.render.zig`) -- one
-pot (breaks on contact), two item kinds (coin/heart) and one powerup kind
-(extra_hp, one per room, revealed
-once its enemies are cleared), three enemy kinds sharing one
-struct (`walker`: ground patrol, turns at walls; `creeper`: patrols
-vertically along a wall; `fly`: patrols horizontally in open air with a
-sine bob) -- the sword swirl is the *only* way to defeat one, any contact
-otherwise hits the player back and starts a brief hit stun -- `particle`'s
-small pops on every break/defeat/collect, and a forward-only
-line of procedurally-generated rooms joined by an eased camera slide (see
-"`map/`" above). Each room's 5x5 terrain tiles come in a small rotation of
-ASCII-art variants (`room.render.zig`) for shape, not color, variety. The
-goal was a scalable skeleton with a couple of moving, testable,
-visibly-working pieces -- fleshing out real content (more enemies, items,
-powerups, room variety, actual "battle" depth, a longer run) is exactly
-what the recipes above are for.
+This is a **prototype of the pattern**, not the game itself, and it's a
+**dodging** game now, not a fighting one: one character -- a gravity-free
+tank gripping a room's floor/wall/ceiling, revving up while held and
+floating in a straight line on release, corner-turning at a surface's end
+while held through it (see "`character/`" above), with rolling-tread/
+rise/peak/fall/squash poses (`character.render.zig`) -- one pot (breaks on
+contact), two item kinds (coin/heart), one powerup kind (extra_hp, one per
+room, revealed once its key is collected), one key per room (the
+objective -- collecting it opens every valid door, see "`map/`" above),
+and three enemy kinds sharing one struct (`walker`: ground patrol, turns
+at walls; `creeper`: patrols vertically along a wall; `fly`: patrols
+horizontally in open air with a sine bob) that the player has **no way to
+fight** -- touching one just hits back and starts a brief hit stun, so the
+only response is to not touch it. `map.sim.generateInto`'s `NO_ENEMY_ROOMS`
+keeps the first few rooms of a run enemy-free entirely, before ramping up.
+`particle`'s small pops mark every break/collect, and it's all joined by a
+forward-only line of procedurally-generated rooms and an eased camera
+slide (see "`map/`" above). Each room's 5x5 terrain tiles come in a small
+rotation of ASCII-art variants (`room.render.zig`) for shape, not color,
+variety, and the interior is otherwise wide open -- no platforms, since
+nothing needs to stand on anything anymore. The goal was a scalable
+skeleton with a couple of moving, testable, visibly-working pieces --
+fleshing out real content (more enemies, items, powerups, room variety, a
+longer run) is exactly what the recipes above are for.

@@ -9,12 +9,16 @@ const pot_types = @import("../pot/pot.types.zig");
 const item_types = @import("../item/item.types.zig");
 const enemy_types = @import("../enemy/enemy.types.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
+const key_types = @import("../key/key.types.zig");
 const particle_sim = @import("../particle/particle.sim.zig");
 const char_types = @import("../character/character.types.zig");
 const map_types = @import("map.types.zig");
 
 const SEED_BASE: u32 = 0xc0ffee;
 const ROOM_SIZE: f32 = @as(f32, @floatFromInt(room_types.GRID_W)) * room_types.TILE_SIZE;
+// The first few rooms have no enemies at all, so the player can learn to
+// dodge/find-the-key before anything's actually hunting them.
+const NO_ENEMY_ROOMS: u32 = 3;
 
 fn seedFor(index: u32) u32 {
     return SEED_BASE +% index *% 2654435761;
@@ -24,19 +28,19 @@ fn tilePx(t: u32) f32 {
     return @as(f32, @floatFromInt(t)) * room_types.TILE_SIZE;
 }
 
-// Fills in a fresh room -- enemy count and powerup tier scale with `index`,
-// the only "how deep is this run" signal now that rooms form a line.
+// Fills in a fresh room -- enemy count scales with `index` past
+// NO_ENEMY_ROOMS. Every non-start room gets one key: collecting it opens the doors.
 fn generateInto(save: *map_types.RoomSave, index: u32, is_start: bool) void {
     var rng = rng_mod.Rng{ .state = seedFor(index) };
-    room_sim.generate(&save.room, &rng);
+    room_sim.generate(&save.room);
 
     for (&save.pots) |*pot| {
-        const spot = room_sim.randomFloorSpot(&save.room, &rng);
+        const spot = room_sim.randomOpenSpot(&save.room, &rng);
         pot.* = .{ .x = tilePx(spot.tx), .y = tilePx(spot.ty) };
     }
     for (&save.items) |*item| item.* = .{};
 
-    const enemy_count: usize = if (is_start) 0 else 1 + @min(index, enemy_types.MAX_COUNT - 1);
+    const enemy_count: usize = if (index < NO_ENEMY_ROOMS) 0 else 1 + @min(index - NO_ENEMY_ROOMS, enemy_types.MAX_COUNT - 1);
     for (&save.enemies, 0..) |*enemy, i| {
         if (i < enemy_count) {
             const kind: enemy_types.EnemyKind = switch (rng.range(3)) {
@@ -52,22 +56,20 @@ fn generateInto(save: *map_types.RoomSave, index: u32, is_start: bool) void {
 
     if (is_start) {
         save.powerup = .{};
+        save.key = .{};
     } else {
-        const spot = room_sim.randomFloorSpot(&save.room, &rng);
-        save.powerup = .{
-            .x = tilePx(spot.tx),
-            .y = tilePx(spot.ty),
-            .placed = true,
-        };
+        const powerup_spot = room_sim.randomOpenSpot(&save.room, &rng);
+        save.powerup = .{ .x = tilePx(powerup_spot.tx), .y = tilePx(powerup_spot.ty), .placed = true };
+        const key_spot = room_sim.randomOpenSpot(&save.room, &rng);
+        save.key = .{ .x = tilePx(key_spot.tx), .y = tilePx(key_spot.ty), .placed = true };
     }
 }
 
-// Placement is kind-specific (ground, wall range, or open-air range) --
-// only walker's goes through randomFloorSpot.
+// Placement is kind-specific (open spot, wall range, or open-air range).
 fn spawnEnemy(enemy: *enemy_types.Enemy, kind: enemy_types.EnemyKind, room: *const room_types.Room, rng: *rng_mod.Rng) void {
     switch (kind) {
         .walker => {
-            const spot = room_sim.randomFloorSpot(room, rng);
+            const spot = room_sim.randomOpenSpot(room, rng);
             enemy.* = .{ .kind = .walker, .x = tilePx(spot.tx), .y = tilePx(spot.ty), .alive = true };
         },
         .creeper => {
@@ -100,6 +102,7 @@ fn loadActive() void {
     item_types.items = map_types.current.items;
     enemy_types.enemies = map_types.current.enemies;
     powerup_types.active = map_types.current.powerup;
+    key_types.active = map_types.current.key;
     room_types.active_door_sides = doorSidesFor(map_types.entered_from);
     room_types.active_open_sides = [_]bool{false} ** 4;
 }
@@ -112,11 +115,10 @@ pub fn newRun() void {
     loadActive();
 }
 
+// A room with no key at all (the start room) is trivially cleared;
+// otherwise clearing means collecting it -- enemies are dodged, not fought.
 pub fn isRoomCleared() bool {
-    for (enemy_types.enemies) |e| {
-        if (e.alive) return false;
-    }
-    return true;
+    return !key_types.active.placed or key_types.active.collected;
 }
 
 fn revealPowerupOnceCleared() void {
@@ -208,7 +210,7 @@ pub fn update(player: *char_types.Character) void {
 
 const testing = @import("std").testing;
 
-test "newRun starts a cleared room (no enemies) with all 3 doors valid" {
+test "newRun starts a cleared room (no key placed) with all 3 doors valid" {
     newRun();
     try testing.expect(isRoomCleared());
     try testing.expect(room_types.active_door_sides[@intFromEnum(room_types.Side.left)]);
@@ -217,25 +219,32 @@ test "newRun starts a cleared room (no enemies) with all 3 doors valid" {
     try testing.expect(!room_types.active_door_sides[@intFromEnum(room_types.Side.up)]);
 }
 
-test "a generated non-start room has at least one enemy and a placed powerup" {
+test "a generated non-start room has a placed key and powerup, and past the easy rooms, an enemy" {
     var save: map_types.RoomSave = .{};
-    generateInto(&save, 1, false);
+    generateInto(&save, NO_ENEMY_ROOMS, false);
+    try testing.expect(save.key.placed);
+    try testing.expect(save.powerup.placed);
     var alive_count: u32 = 0;
     for (save.enemies) |e| {
         if (e.alive) alive_count += 1;
     }
     try testing.expect(alive_count >= 1);
-    try testing.expect(save.powerup.placed);
 }
 
-test "doors only open once the room is cleared" {
+test "the first few rooms generate with no enemies at all" {
+    var save: map_types.RoomSave = .{};
+    generateInto(&save, NO_ENEMY_ROOMS - 1, false);
+    for (save.enemies) |e| try testing.expect(!e.alive);
+}
+
+test "doors only open once the room's key is collected" {
     newRun();
-    enemy_types.enemies[0] = .{ .alive = true, .x = 5, .y = 5 };
+    key_types.active = .{ .x = 5, .y = 5, .placed = true };
     var player = char_types.Character{};
     update(&player);
     try testing.expect(!room_types.active_open_sides[@intFromEnum(room_types.Side.right)]);
 
-    enemy_types.enemies[0].alive = false;
+    key_types.active.collected = true;
     update(&player);
     try testing.expect(room_types.active_open_sides[@intFromEnum(room_types.Side.right)]);
 }

@@ -1,10 +1,11 @@
 # unboxed
 
-A procedurally-generated roguelike-platformer for the [WASM-4](https://wasm4.org) fantasy console,
-written in Zig, and a one-button game: you play a tank gripping a room's floor, wall, or ceiling --
-hold the button to rev it up, let go to launch into a leaping swirl attack, or just tap it to turn
-around. Break pots, collect items, and clear each room of enemies to move on through one of its
-doors into a fresh room further down the line, picking up permanent powerups along the way.
+A procedurally-generated roguelike-**dodging** game for the [WASM-4](https://wasm4.org) fantasy
+console, written in Zig, and a one-button game: you play a gravity-free tank gripping a room's
+floor, wall, or ceiling -- hold the button to rev it up, let go to float freely across the room, or
+just tap it to turn around. There's no way to fight back, so enemies are obstacles to dodge, not
+targets. Break pots, collect items, and find each room's key to open its doors and move on to a
+fresh room further down the line, picking up permanent powerups along the way.
 
 This repo is also a from-scratch reboot of an earlier platformer's architecture -- see
 [CLAUDE.md](CLAUDE.md) for the organizing ideas (locality-based folders, assets defined in code,
@@ -69,21 +70,22 @@ Every push to `main` auto-deploys a standalone web build to GitHub Pages
 One button, **X**, does everything. Hold it and the tank revs up along whatever surface it's
 gripping instead of snapping straight to full speed; let go of nothing and it just sits still. A
 quick **tap** turns the tank around in place. **Hold it for real, then release**, and it's the
-jump: it leaps off whatever it's gripping -- further the more you'd revved up -- arcing through the
-air while throwing a midair swirl attack at the same instant, then lands somewhere new sitting
-still, ready for another hold. Press **X** again while already airborne for an extra swirl, hitting
-every side at once. Drive into the end of a floor or ceiling and it corners onto the next wall
-automatically, so holding through a corner keeps it crawling around a room's inside perimeter.
-Driving into a pot breaks it -- it may reveal a coin (score) or a heart (heals), with a little burst
-of particles. Three enemy kinds patrol -- walkers along the ground, creepers up and
-down a wall, flies back and forth through open air -- and the swirl is the only way to defeat one;
-touching an enemy any other way just hits you back and briefly stuns you.
+jump: it leaps off whatever it's gripping -- further the more you'd revved up -- and floats in a
+dead-straight line (there's no gravity) until it runs into something new to grip. Drive into the
+end of a floor or ceiling and it corners onto the next wall automatically, so holding through a
+corner keeps it crawling around a room's inside perimeter. Driving into a pot breaks it -- it may
+reveal a coin (score) or a heart (heals), with a little burst of particles.
 
-Every room starts with its doors shut -- clearing every enemy in it (the first room has none, so
-it's already clear) reveals its powerup and opens a door on each side that isn't the one you came
-in through (never up, which stays real platforming). Walk through any open one and the camera eases
-into a fresh room further down the line -- there's no going back, so every room is new. Losing all
-your HP ends the run; press **X** to start over.
+There's no attack. Three enemy kinds patrol -- walkers along the ground, creepers up and down a
+wall, flies back and forth through open air -- and touching one just hits you back and briefly
+stuns you, so the only way to deal with them is to not touch them. The first few rooms of a run
+have none at all, so you can get a feel for floating around before anything's actually hunting you.
+
+Every room starts with its doors shut -- finding and collecting its key reveals the room's powerup
+and opens a door on each side that isn't the one you came in through (never up, which stays real
+platforming). Walk through any open one and the camera eases into a fresh room further down the
+line -- there's no going back, so every room is new. Losing all your HP ends the run; press **X**
+to start over.
 
 ## Project layout
 
@@ -95,10 +97,11 @@ full rationale and the recipe for adding a new one.
   sprites, defined in code instead of imported images), `core.collision` (AABB overlap + tile
   collision), `core.gravity`, `core.input` (gamepad edge detection), `core.rng` (deterministic
   xorshift32, used for procedural generation).
-- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`, `particle/`**: one entity kind each, split
-  into `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing). `particle/` is the
-  odd one out -- short-lived visual pops with no player interaction, spawned by `game.sim` whenever
-  something breaks/dies/gets collected.
+- **`character/`, `pot/`, `item/`, `enemy/`, `powerup/`, `key/`, `particle/`**: one entity kind
+  each, split into `.types.zig` (data), `.sim.zig` (logic + tests), `.render.zig` (drawing). `key/`
+  is one per room and collecting it is what opens the doors (see CLAUDE.md's `map/` section).
+  `particle/` is the odd one out -- short-lived visual pops with no player interaction, spawned by
+  `game.sim` whenever something breaks/gets collected.
 - **`room/`**: one screen's 32x32 tile grid, its procedural generation, and its (up to 3) doors.
 - **`map/`**: the forward-only room progression -- generates the next room the instant you touch an
   open door, and drives the eased camera transition into it (see CLAUDE.md's `map/` section).

@@ -15,6 +15,8 @@ const enemy_types = @import("../enemy/enemy.types.zig");
 const enemy_render = @import("../enemy/enemy.render.zig");
 const powerup_types = @import("../powerup/powerup.types.zig");
 const powerup_render = @import("../powerup/powerup.render.zig");
+const key_types = @import("../key/key.types.zig");
+const key_render = @import("../key/key.render.zig");
 const particle_render = @import("../particle/particle.render.zig");
 const camera = @import("../core/core.camera.zig");
 const map_types = @import("../map/map.types.zig");
@@ -28,6 +30,7 @@ fn drawRoomEntities(
     items: []const item_types.Item,
     enemies: []const enemy_types.Enemy,
     powerup: powerup_types.Powerup,
+    key: key_types.Key,
     ox: i32,
     oy: i32,
 ) void {
@@ -36,6 +39,7 @@ fn drawRoomEntities(
     for (items) |item| item_render.draw(item, ox, oy);
     for (enemies) |enemy| enemy_render.draw(enemy, ox, oy);
     powerup_render.draw(powerup, ox, oy);
+    key_render.draw(key, ox, oy);
     particle_render.draw(ox, oy);
 }
 
@@ -43,7 +47,7 @@ pub fn draw() void {
     if (map_types.transition.active) {
         drawTransition();
     } else {
-        drawRoomEntities(&room_types.active, &pot_types.pots, &item_types.items, &enemy_types.enemies, powerup_types.active, 0, 0);
+        drawRoomEntities(&room_types.active, &pot_types.pots, &item_types.items, &enemy_types.enemies, powerup_types.active, key_types.active, 0, 0);
     }
     char_render.draw(char_types.player);
     drawOverlay();
@@ -77,8 +81,8 @@ fn drawTransition() void {
         .up => unreachable, // never a transition direction
     }
 
-    drawRoomEntities(&room_types.active, &pot_types.pots, &item_types.items, &enemy_types.enemies, powerup_types.active, cur_ox, cur_oy);
-    drawRoomEntities(&map_types.next.room, &map_types.next.pots, &map_types.next.items, &map_types.next.enemies, map_types.next.powerup, next_ox, next_oy);
+    drawRoomEntities(&room_types.active, &pot_types.pots, &item_types.items, &enemy_types.enemies, powerup_types.active, key_types.active, cur_ox, cur_oy);
+    drawRoomEntities(&map_types.next.room, &map_types.next.pots, &map_types.next.items, &map_types.next.enemies, map_types.next.powerup, map_types.next.key, next_ox, next_oy);
 }
 
 fn drawOverlay() void {
