@@ -11,8 +11,15 @@ pub const Sprite = struct {
     pixels: []const u8,
 
     pub fn draw(self: Sprite, x: i32, y: i32, flip_x: bool) void {
+        self.drawFlipped(x, y, flip_x, false);
+    }
+
+    // Like `draw`, plus an independent vertical flip -- for a sprite that
+    // needs both axes (character.render's wall-climb pose facing up/down).
+    pub fn drawFlipped(self: Sprite, x: i32, y: i32, flip_x: bool, flip_y: bool) void {
         var flags: u32 = w4.BLIT_1BPP;
         if (flip_x) flags |= w4.BLIT_FLIP_X;
+        if (flip_y) flags |= w4.BLIT_FLIP_Y;
         w4.Blit(self.pixels.ptr, x, y, self.width, self.height, flags);
     }
 };

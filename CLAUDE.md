@@ -181,12 +181,21 @@ surface's end instead of corner-turning (see `character.sim.update`'s
 `x_blocked`/`y_blocked` for the pattern).
 
 The jump button leaps the tank off its current surface (`surface = null`),
-launching it away at `LEAP_SPEED` along that surface's grip direction,
+launching it away along that surface's grip direction (`LEAP_SPEED` off
+floor/ceiling, the weaker `WALL_LEAP_SPEED` sideways off a wall -- a full
+vertical-strength shove sideways flings it clear across the room) and
 carrying its travel speed into the arc -- one motion covers the old ground
 jump, wall-jump, all of them, since every surface now works the same way.
-Landing on anything while airborne reattaches to a surface based on which
-side the collision hit. Pressed again mid-air, the same button triggers
-the midair swirl attack instead (`character.sim.update`'s `else` branch).
+The leap also resyncs `facing_right` to whichever way it's now actually
+moving horizontally, since a wall push and the tank's last horizontal
+travel direction aren't the same thing. Landing on anything while airborne
+reattaches to a surface based on which side the collision hit. Pressed
+again mid-air, the same button triggers the midair swirl attack instead
+(`character.sim.update`'s `else` branch). While climbing a wall,
+`character.render` also draws a 90-degrees-rotated tread sprite
+(`drawFlipped`'s independent flip_y picks facing up vs down) instead of
+rotating the upright one, since hand-drawn art beats fighting WASM-4's
+blit rotate/flip flag semantics for one pose.
 
 ## State: `pub var`, one per locality
 

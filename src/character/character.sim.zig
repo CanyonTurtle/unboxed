@@ -11,7 +11,8 @@ const types = @import("character.types.zig");
 
 const FORWARD_SPEED: f32 = 1.1; // constant drive speed along whatever surface is gripped
 const GRIP_SPEED: f32 = 0.6; // constant push into the gripped surface, keeping it snapped there
-const LEAP_SPEED: f32 = 4.2; // magnitude of a leap off the current surface, direction below
+const LEAP_SPEED: f32 = 4.2; // leap magnitude off the floor/ceiling (vertical)
+const WALL_LEAP_SPEED: f32 = 2.0; // leap magnitude off a wall (sideways) -- weaker, or it flies too far
 const DAMAGE_KNOCKBACK: f32 = 2.0;
 const INVULN_FRAMES: u16 = 45;
 const SQUASH_FRAMES: u8 = 7;
@@ -88,10 +89,11 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
         }
         if (!gripAxisIsX(surface)) self.facing_right = travel > 0;
 
-        // Leaps away from the surface (local "up"), carrying travel speed
-        // into the arc -- one button for every surface, ground jump included.
+        // Leaps off the surface (local "up"), carrying travel speed into
+        // the arc -- weaker off a wall, or it flings the tank across the room.
         if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
-            const leap = -gripSign(surface) * LEAP_SPEED;
+            const leap_speed = if (gripAxisIsX(surface)) WALL_LEAP_SPEED else LEAP_SPEED;
+            const leap = -gripSign(surface) * leap_speed;
             if (gripAxisIsX(surface)) {
                 self.vel_x = leap;
                 self.vel_y = travel;
@@ -99,6 +101,9 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
                 self.vel_x = travel;
                 self.vel_y = leap;
             }
+            // Whichever way it's now actually moving horizontally, face
+            // that way -- otherwise a wall leap can land facing backwards.
+            self.facing_right = self.vel_x > 0;
             self.surface = null;
         }
     } else {
