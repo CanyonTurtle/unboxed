@@ -186,11 +186,15 @@ floor/ceiling, the weaker `WALL_LEAP_SPEED` sideways off a wall -- a full
 vertical-strength shove sideways flings it clear across the room) and
 carrying its travel speed into the arc -- one motion covers the old ground
 jump, wall-jump, all of them, since every surface now works the same way.
-The leap also resyncs `facing_right` to whichever way it's now actually
-moving horizontally, since a wall push and the tank's last horizontal
-travel direction aren't the same thing. Landing on anything while airborne
-reattaches to a surface based on which side the collision hit. Pressed
-again mid-air, the same button triggers the midair swirl attack instead
+The leap also resyncs `facing_right` immediately (to the sign of the
+leap's own resulting `vel_x`) and, on landing, resyncs `clockwise` too
+(`character.sim.clockwiseFor`, from whichever pre-collision velocity
+matches the new surface's travel axis) -- **both are needed**: `clockwise`
+governs steering, which recomputes velocity itself once gripped again, so
+without also resyncing it a wall leap looks right mid-air but snaps back
+to its old direction the instant it lands. Landing reattaches to a surface
+based on which side the collision hit. Pressed again mid-air, the same
+button triggers the midair swirl attack instead
 (`character.sim.update`'s `else` branch). While climbing a wall,
 `character.render` also draws a 90-degrees-rotated tread sprite
 (`drawFlipped`'s independent flip_y picks facing up vs down) instead of

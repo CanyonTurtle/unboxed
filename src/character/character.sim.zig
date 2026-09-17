@@ -36,14 +36,24 @@ fn gripSign(surface: types.Surface) f32 {
 
 // Which way is "clockwise" along the travel axis for this surface -- floor
 // left, left_wall up, ceiling right, right_wall down -- so cw traces the perimeter.
-fn travelSign(surface: types.Surface, clockwise: bool) f32 {
-    const cw_sign: f32 = switch (surface) {
+fn cwSign(surface: types.Surface) f32 {
+    return switch (surface) {
         .floor => -1,
         .left_wall => -1,
         .ceiling => 1,
         .right_wall => 1,
     };
-    return if (clockwise) cw_sign else -cw_sign;
+}
+
+fn travelSign(surface: types.Surface, clockwise: bool) f32 {
+    const sign = cwSign(surface);
+    return if (clockwise) sign else -sign;
+}
+
+// Which `clockwise` reproduces this travel-axis velocity on this surface --
+// resyncs steering from momentum on landing; it otherwise only changes via steering input.
+fn clockwiseFor(surface: types.Surface, travel_velocity: f32) bool {
+    return (travel_velocity < 0) == (cwSign(surface) < 0);
 }
 
 // The next surface reached by traveling off the end of this one, in the
@@ -114,6 +124,7 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     }
 
     const vel_x_before_collision = self.vel_x;
+    const vel_y_before_collision = self.vel_y;
     const tiles = collision.TileQuery{ .tile_size = room_types.TILE_SIZE, .isSolid = &room_types.isSolid };
     const result = collision.moveAndCollide(&self.x, &self.y, types.WIDTH, types.HEIGHT, &self.vel_x, &self.vel_y, tiles);
 
@@ -133,12 +144,16 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
             self.surface = null; // drove off the edge -- fall until something catches it
         }
     } else if (self.surface == null) {
-        // Airborne (leaping or falling) -- landing on anything reattaches,
-        // the side it lands on deciding which surface.
+        // Airborne -- landing reattaches by which side it hit, and resyncs
+        // `clockwise` to momentum, not whichever way it faced before leaping.
         if (result.on_ground) {
             self.surface = .floor;
+            if (vel_x_before_collision != 0) self.clockwise = clockwiseFor(.floor, vel_x_before_collision);
         } else if (result.hit_wall) {
             self.surface = if (vel_x_before_collision > 0) .right_wall else if (vel_x_before_collision < 0) .left_wall else null;
+            if (self.surface) |landed| {
+                if (vel_y_before_collision != 0) self.clockwise = clockwiseFor(landed, vel_y_before_collision);
+            }
         }
     }
 
@@ -196,6 +211,27 @@ test "the jump button leaps off the current surface, and a second press mid-air 
 
     update(&c, w4.BUTTON_1, 0);
     try testing.expect(c.swing_timer > 0);
+}
+
+test "leaping off a wall and landing on the floor keeps driving the way the leap carried it" {
+    room_types.active = .{};
+    for (5..21) |ty| room_types.active.tiles[ty][5] = .wall; // a wall to climb
+    for (6..15) |tx| room_types.active.tiles[20][tx] = .ground; // floor below to land on
+
+    // Climbing up the wall (clockwise on left_wall travels -y); leaping
+    // pushes it right, away from the wall (+x), regardless of `clockwise`.
+    var c = types.Character{ .x = 30, .y = 60, .surface = .left_wall, .clockwise = true };
+    update(&c, w4.BUTTON_1, 0);
+    try testing.expect(c.surface == null);
+    try testing.expect(c.vel_x > 0);
+
+    var i: u32 = 0;
+    while (i < 60 and c.surface == null) : (i += 1) update(&c, 0, 0);
+
+    try testing.expectEqual(types.Surface.floor, c.surface.?);
+    const x_after_landing = c.x;
+    update(&c, 0, 0); // now driving on the floor -- should still be heading right
+    try testing.expect(c.x > x_after_landing);
 }
 
 test "landing back on a surface starts the squash timer" {
