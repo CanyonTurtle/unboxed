@@ -149,27 +149,41 @@ room, see `map.sim.entryPosition`) -- the one other place, besides a
 `RideResult`-style report, where a non-`game.sim` file is allowed to move
 the player, since the player *is* what's transitioning.
 
-## `character/`: a tank that never stops
+## `character/`: a tank that revs up and releases
 
-The player is a tank, not a walker: it never sits idle, always auto-driving
-along whichever of a room's 4 inner surfaces it currently grips --
+The player is a tank gripping one of a room's 4 inner surfaces --
 `character.types.Surface`: `floor`, `ceiling`, `left_wall`, `right_wall`, or
 `null` for airborne (mid-leap, or falling after losing grip). Arrow keys
-never set velocity directly; they only steer, i.e. flip `Character.
-clockwise`, the rotational sense the tank drives in -- `character.sim.
-steerButtons` picks which two of the four arrow buttons apply, since only
-one axis (whichever the current surface travels along) means anything.
+never set velocity directly; `character.sim.steerButtons` picks which two
+of the four apply (only one axis, whichever the current surface travels
+along, means anything), and holding one **revs up** `Character.speed`
+(`ACCEL` per frame, capped at `MAX_SPEED`) rather than snapping straight to
+a constant -- holding the *other* one brakes `speed` back to 0 first before
+committing to the new `clockwise` sense, and holding neither (or both)
+just bleeds `speed` off. **The tank only moves while a direction is held**;
+at `speed == 0` it sits completely still.
+
+**Releasing** a held direction (`character.sim.update`'s `releasing`,
+a was-throttling-now-isn't edge) is the jump: it leaps the tank off its
+surface, launching along that surface's grip direction scaled by whatever
+`speed` had built up (`leap_base + speed*leap_scale` -- a tap still hops,
+a fully-revved release launches much further; wall leaps use weaker
+`WALL_LEAP_*` constants across the board), carries the rest of that speed
+into the arc as the perpendicular component, throws the midair swirl
+attack at the same instant, and resets `speed` to 0 -- it lands sitting
+still, awaiting a fresh hold. Pressed again mid-air, the jump button
+throws an *extra* swirl manually (`character.sim.update`'s `else` branch).
 
 Each surface has a **grip axis** (the constant small push that keeps the
 tank snapped against it, standing in for gravity) and a **travel axis**
-(the constant-speed drive, perpendicular to grip) -- `character.sim.
+(where `speed` actually drives, perpendicular to grip) -- `character.sim.
 gripAxisIsX`/`gripSign`/`travelSign` compute both from `(surface,
 clockwise)`. Reaching the end of the current surface (`travel_blocked` in
 `update`) corner-turns onto the next one via `nextSurface`, in the same
-rotational sense -- drive with no input at all and the tank crawls the
-whole inside perimeter of a room, floor to wall to ceiling and back. **A
-new door direction or room shape needs this cycle re-checked**: `nextSurface`
-hard-codes a rectangular room's 4-surface loop.
+rotational sense -- hold the same direction through a corner and the tank
+keeps crawling, floor to wall to ceiling and back. **A new door direction
+or room shape needs this cycle re-checked**: `nextSurface` hard-codes a
+rectangular room's 4-surface loop.
 
 **`core.collision.moveAndCollide`'s `on_ground`/`hit_wall`/`hit_ceiling`
 flags aren't symmetric** -- `hit_wall` fires for a collision in *either* x
@@ -180,26 +194,19 @@ never just one -- getting this wrong silently wedges the tank at a
 surface's end instead of corner-turning (see `character.sim.update`'s
 `x_blocked`/`y_blocked` for the pattern).
 
-The jump button leaps the tank off its current surface (`surface = null`),
-launching it away along that surface's grip direction (`LEAP_SPEED` off
-floor/ceiling, the weaker `WALL_LEAP_SPEED` sideways off a wall -- a full
-vertical-strength shove sideways flings it clear across the room) and
-carrying its travel speed into the arc -- one motion covers the old ground
-jump, wall-jump, all of them, since every surface now works the same way.
-The leap also resyncs `facing_right` immediately (to the sign of the
-leap's own resulting `vel_x`) and, on landing, resyncs `clockwise` too
+The leap also resyncs `facing_right` immediately (to the sign of its own
+resulting `vel_x`) and, on landing, resyncs `clockwise` too
 (`character.sim.clockwiseFor`, from whichever pre-collision velocity
 matches the new surface's travel axis) -- **both are needed**: `clockwise`
 governs steering, which recomputes velocity itself once gripped again, so
-without also resyncing it a wall leap looks right mid-air but snaps back
-to its old direction the instant it lands. Landing reattaches to a surface
-based on which side the collision hit. Pressed again mid-air, the same
-button triggers the midair swirl attack instead
-(`character.sim.update`'s `else` branch). While climbing a wall,
-`character.render` also draws a 90-degrees-rotated tread sprite
-(`drawFlipped`'s independent flip_y picks facing up vs down) instead of
-rotating the upright one, since hand-drawn art beats fighting WASM-4's
-blit rotate/flip flag semantics for one pose.
+without also resyncing it a leap looks right mid-air but snaps back to
+its old direction the instant it lands (moot for `speed`, which is
+already 0 by then, but still correct bookkeeping for whichever way it
+next revs up). Landing reattaches to a surface based on which side the
+collision hit. While climbing a wall, `character.render` also draws a
+90-degrees-rotated tread sprite (`drawFlipped`'s independent flip_y picks
+facing up vs down) instead of rotating the upright one, since hand-drawn
+art beats fighting WASM-4's blit rotate/flip flag semantics for one pose.
 
 ## State: `pub var`, one per locality
 
@@ -305,12 +312,11 @@ terrain.
 ## What's actually implemented here
 
 This is a **prototype of the pattern**, not the game itself: one character
--- a tank that never stops, auto-driving whatever surface it grips and
-corner-turning at its end (see "`character/`" above), with rolling-tread/
-rise/peak/fall/squash poses (`character.render.zig`) -- and one attack: a
-midair swirl, sharing the jump button, that only triggers
-when airborne (character.sim.update's jump-button branch) -- one pot
-(breaks on contact), two item kinds (coin/heart) and one powerup kind
+-- a tank gripping a room's floor/wall/ceiling, revving up while a
+direction is held and releasing to leap+swirl, corner-turning at a
+surface's end while held through it (see "`character/`" above), with
+rolling-tread/rise/peak/fall/squash poses (`character.render.zig`) -- one
+pot (breaks on contact), two item kinds (coin/heart) and one powerup kind
 (extra_hp, one per room, revealed
 once its enemies are cleared), three enemy kinds sharing one
 struct (`walker`: ground patrol, turns at walls; `creeper`: patrols

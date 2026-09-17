@@ -25,9 +25,11 @@ pub const Character = struct {
     vel_y: f32 = 0,
     facing_right: bool = true,
     surface: ?Surface = null,
-    // Rotational sense the tank drives in (true = clockwise) -- steering
-    // only ever flips this; the tank never stops moving.
+    // Rotational sense the tank drives in (true = clockwise) -- see `speed`.
     clockwise: bool = false,
+    // Drive speed, 0..MAX_SPEED -- builds while a direction is held, bleeds
+    // off when it isn't. Releasing fires a leap+swirl scaled by it, then resets to 0.
+    speed: f32 = 0,
     // Wraps continuously while gripping a surface -- character.render uses
     // it to alternate tread frames, giving the tracks a rolling look.
     drive_anim: u16 = 0,

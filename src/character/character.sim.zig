@@ -1,5 +1,5 @@
-// Character movement: a tank that never stops, auto-driving a gripped
-// surface, corner-turning at its end. Jump leaps off; mid-air it swirls.
+// Character movement: hold a direction to rev up (Character.speed), release
+// to launch a leap+swirl combo scaled by it. Otherwise speed bleeds off.
 
 const std = @import("std");
 const w4 = @import("../wasm4.zig");
@@ -9,10 +9,16 @@ const collision = @import("../core/core.collision.zig");
 const room_types = @import("../room/room.types.zig");
 const types = @import("character.types.zig");
 
-const FORWARD_SPEED: f32 = 1.1; // constant drive speed along whatever surface is gripped
+const MAX_SPEED: f32 = 2.0; // top drive speed, reached by holding a direction
+const ACCEL: f32 = 0.09; // speed gained per frame held -- a real "revving up"
+const DECEL: f32 = 0.15; // speed lost per frame not (correctly) held -- brakes faster than it revs
 const GRIP_SPEED: f32 = 0.6; // constant push into the gripped surface, keeping it snapped there
-const LEAP_SPEED: f32 = 4.2; // leap magnitude off the floor/ceiling (vertical)
-const WALL_LEAP_SPEED: f32 = 2.0; // leap magnitude off a wall (sideways) -- weaker, or it flies too far
+// Releasing launches leap_base + speed*leap_scale: a tap still hops, a
+// fully-revved release launches further. Wall leaps stay weaker overall.
+const LEAP_BASE: f32 = 2.0;
+const LEAP_SCALE: f32 = 1.4;
+const WALL_LEAP_BASE: f32 = 1.0;
+const WALL_LEAP_SCALE: f32 = 0.6;
 const DAMAGE_KNOCKBACK: f32 = 2.0;
 const INVULN_FRAMES: u16 = 45;
 const SQUASH_FRAMES: u8 = 7;
@@ -83,12 +89,26 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
     const surface_before = self.surface;
 
     if (surface_before) |surface| {
-        if (!stunned) {
-            const buttons = steerButtons(surface);
-            if (input.held(gamepad, buttons.cw)) self.clockwise = true;
-            if (input.held(gamepad, buttons.ccw)) self.clockwise = false;
+        const buttons = steerButtons(surface);
+        const held_cw = input.held(gamepad, buttons.cw);
+        const held_ccw = input.held(gamepad, buttons.ccw);
+        const throttling = held_cw != held_ccw; // exactly one of the two -- both/neither means "not driving"
+        const was_throttling = input.held(prev_gamepad, buttons.cw) != input.held(prev_gamepad, buttons.ccw);
+        const releasing = !stunned and was_throttling and !throttling;
+
+        if (!stunned and !releasing) {
+            if (throttling and held_cw == self.clockwise) {
+                self.speed = @min(self.speed + ACCEL, MAX_SPEED);
+            } else if (throttling) {
+                // Holding the opposite way -- brake to a stop before it commits to it.
+                self.speed = @max(self.speed - DECEL, 0);
+                if (self.speed == 0) self.clockwise = held_cw;
+            } else {
+                self.speed = @max(self.speed - DECEL, 0);
+            }
         }
-        const travel = FORWARD_SPEED * travelSign(surface, self.clockwise);
+
+        const travel = self.speed * travelSign(surface, self.clockwise);
         const grip = GRIP_SPEED * gripSign(surface);
         if (gripAxisIsX(surface)) {
             self.vel_x = grip;
@@ -99,22 +119,23 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
         }
         if (!gripAxisIsX(surface)) self.facing_right = travel > 0;
 
-        // Leaps off the surface (local "up"), carrying travel speed into
-        // the arc -- weaker off a wall, or it flings the tank across the room.
-        if (!stunned and input.justPressed(gamepad, prev_gamepad, w4.BUTTON_1)) {
-            const leap_speed = if (gripAxisIsX(surface)) WALL_LEAP_SPEED else LEAP_SPEED;
-            const leap = -gripSign(surface) * leap_speed;
+        // Releasing a held direction leaps off the surface (local "up"),
+        // scaled by whatever speed had built up, and throws a swirl too.
+        if (releasing) {
+            const leap_base = if (gripAxisIsX(surface)) WALL_LEAP_BASE else LEAP_BASE;
+            const leap_scale = if (gripAxisIsX(surface)) WALL_LEAP_SCALE else LEAP_SCALE;
+            const leap = -gripSign(surface) * (leap_base + self.speed * leap_scale);
             if (gripAxisIsX(surface)) {
                 self.vel_x = leap;
-                self.vel_y = travel;
             } else {
-                self.vel_x = travel;
                 self.vel_y = leap;
             }
             // Whichever way it's now actually moving horizontally, face
             // that way -- otherwise a wall leap can land facing backwards.
             self.facing_right = self.vel_x > 0;
+            self.swing_timer = types.SWING_FRAMES;
             self.surface = null;
+            self.speed = 0;
         }
     } else {
         gravity.apply(&self.vel_y, false);
@@ -180,58 +201,82 @@ pub fn takeDamage(self: *types.Character, amount: i32, from_x: f32) void {
 
 const testing = std.testing;
 
-test "on the floor, the tank drives left with no input at all -- it never idles" {
+test "holding the matching direction accelerates the tank's speed" {
     room_types.active = .{};
     for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    const buttons = steerButtons(.floor);
     var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true };
-    const start_x = c.x;
-    update(&c, 0, 0);
-    try testing.expect(c.x < start_x);
-    try testing.expectEqual(types.Surface.floor, c.surface.?);
+    update(&c, buttons.cw, 0);
+    const speed_after_one = c.speed;
+    try testing.expect(speed_after_one > 0);
+    update(&c, buttons.cw, buttons.cw);
+    try testing.expect(c.speed > speed_after_one); // keeps revving up
 }
 
-test "steering the opposite way reverses travel direction" {
+test "with no direction held, speed bleeds off instead of idling forever" {
     room_types.active = .{};
     for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
-    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true };
-    update(&c, w4.BUTTON_RIGHT, 0); // ccw button on the floor -- reverses it
-    try testing.expect(!c.clockwise);
-    const x_after_reverse = c.x;
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true, .speed = 0.1 };
     update(&c, 0, 0);
-    try testing.expect(c.x > x_after_reverse);
+    try testing.expectEqual(@as(f32, 0), c.speed); // DECEL(0.15) > 0.1, clamped at 0
+    const x_after = c.x;
+    update(&c, 0, 0);
+    try testing.expectEqual(x_after, c.x); // sitting at zero speed -- it doesn't drift
 }
 
-test "the jump button leaps off the current surface, and a second press mid-air swirls" {
+test "holding the opposite direction brakes to a stop before committing to it" {
     room_types.active = .{};
     for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
-    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor };
-    update(&c, w4.BUTTON_1, 0);
+    const buttons = steerButtons(.floor);
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true, .speed = 0.1 };
+    update(&c, buttons.ccw, 0); // opposite of clockwise=true -- brakes, not an instant flip
+    try testing.expectEqual(@as(f32, 0), c.speed);
+    try testing.expect(!c.clockwise); // speed hit zero this frame, so it commits to the new way
+}
+
+test "releasing a held direction leaps off the surface and throws a swirl combo" {
+    room_types.active = .{};
+    for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    const buttons = steerButtons(.floor);
+    var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true };
+    update(&c, buttons.cw, 0); // hold briefly to build a little charge
+    update(&c, 0, buttons.cw); // release
     try testing.expect(c.surface == null);
     try testing.expect(c.vel_y < 0); // leapt upward, away from the floor
+    try testing.expect(c.swing_timer > 0);
+    try testing.expectEqual(@as(f32, 0), c.speed);
+}
 
+test "the jump button still throws an extra swirl manually while airborne" {
+    var c = types.Character{ .x = 60, .y = 40, .surface = null, .vel_y = -2 };
     update(&c, w4.BUTTON_1, 0);
     try testing.expect(c.swing_timer > 0);
 }
 
-test "leaping off a wall and landing on the floor keeps driving the way the leap carried it" {
+test "releasing while climbing a wall leaps away, and lands sitting still" {
     room_types.active = .{};
     for (5..21) |ty| room_types.active.tiles[ty][5] = .wall; // a wall to climb
     for (6..15) |tx| room_types.active.tiles[20][tx] = .ground; // floor below to land on
 
-    // Climbing up the wall (clockwise on left_wall travels -y); leaping
+    // Climbing up the wall (clockwise on left_wall holds UP); releasing
     // pushes it right, away from the wall (+x), regardless of `clockwise`.
+    const buttons = steerButtons(.left_wall);
     var c = types.Character{ .x = 30, .y = 60, .surface = .left_wall, .clockwise = true };
-    update(&c, w4.BUTTON_1, 0);
+    var i: u32 = 0;
+    while (i < 15) : (i += 1) update(&c, buttons.cw, 0); // hold to build real charge
+    try testing.expect(c.speed > 0);
+
+    update(&c, 0, buttons.cw); // release
     try testing.expect(c.surface == null);
     try testing.expect(c.vel_x > 0);
+    try testing.expect(c.swing_timer > 0);
+    try testing.expectEqual(@as(f32, 0), c.speed);
 
-    var i: u32 = 0;
+    i = 0;
     while (i < 60 and c.surface == null) : (i += 1) update(&c, 0, 0);
-
     try testing.expectEqual(types.Surface.floor, c.surface.?);
-    const x_after_landing = c.x;
-    update(&c, 0, 0); // now driving on the floor -- should still be heading right
-    try testing.expect(c.x > x_after_landing);
+    try testing.expect(!c.clockwise); // resynced to the rightward flight, not the old upward climb
+    try testing.expectEqual(@as(f32, 0), c.speed); // sits still until steered again
 }
 
 test "landing back on a surface starts the squash timer" {
@@ -243,16 +288,17 @@ test "landing back on a surface starts the squash timer" {
     try testing.expect(c.squash_timer > 0);
 }
 
-test "hit stun suppresses steering until it expires" {
+test "hit stun suppresses throttle input until it expires" {
     room_types.active = .{};
     for (0..room_types.GRID_W) |tx| room_types.active.tiles[10][tx] = .ground;
+    const buttons = steerButtons(.floor);
     var c = types.Character{ .x = 60, .y = 50 - types.HEIGHT, .surface = .floor, .clockwise = true, .hit_stun_timer = 1 };
-    update(&c, w4.BUTTON_RIGHT, 0); // still stunned this frame -- steering ignored
-    try testing.expect(c.clockwise);
+    update(&c, buttons.cw, 0); // still stunned this frame -- throttle ignored
+    try testing.expectEqual(@as(f32, 0), c.speed);
     try testing.expectEqual(@as(u16, 0), c.hit_stun_timer);
 
-    update(&c, w4.BUTTON_RIGHT, 0); // stun has expired -- steering works now
-    try testing.expect(!c.clockwise);
+    update(&c, buttons.cw, 0); // stun has expired -- throttle works now
+    try testing.expect(c.speed > 0);
 }
 
 test "takeDamage knocks the character airborne, applies knockback, and starts invuln/stun" {
@@ -290,7 +336,10 @@ test "driving clockwise crawls the whole inside perimeter: floor -> wall -> ceil
     var back_to_floor = false;
     var i: u32 = 0;
     while (i < 400) : (i += 1) {
-        update(&c, 0, 0);
+        // Hold the current surface's own cw button every frame, so speed
+        // stays revved up as it corners from one surface onto the next.
+        const buttons = steerButtons(c.surface orelse .floor);
+        update(&c, buttons.cw, 0);
         if (c.surface) |s| switch (s) {
             .left_wall => seen_left_wall = true,
             .ceiling => seen_ceiling = true,
