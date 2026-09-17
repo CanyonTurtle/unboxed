@@ -87,19 +87,24 @@ const FALL_SPRITE = sprite_mod.fromArt(&.{
     "........",
 });
 
-// The swirl's swept path -- a quadratic Bezier bowed past the swirl's own
-// radius, bellying outward into a wide blade. Angles: 0 = right, +y = down.
+// The swirl's swept path: a short bulged blade segment, fixed width, whose
+// center angle moves (swirlCenterAngle) so it orbits rather than sits fixed.
 const SWIRL_RADIUS: f32 = 13;
 const SWIRL_BULGE: f32 = 24;
-const SWIRL_START_ANGLE: f32 = -2.6;
-const SWIRL_SWEEP_ANGLE: f32 = 5.6;
+const SWIRL_ARC_WIDTH: f32 = 2.2; // angular width of the visible blade, in radians
+const SWIRL_BASE_ANGLE: f32 = -2.6; // where the orbit starts (0 = right, +y = down)
+const SWIRL_TOTAL_ROTATION: f32 = 6.6; // a bit over one full turn over the whole swing
 
-fn swirlCurvePoint(center: curve.Point, t: f32) curve.Point {
-    const end_angle = SWIRL_START_ANGLE + SWIRL_SWEEP_ANGLE;
-    const mid_angle = (SWIRL_START_ANGLE + end_angle) / 2;
-    const p0 = curve.Point{ .x = center.x + @cos(SWIRL_START_ANGLE) * SWIRL_RADIUS, .y = center.y + @sin(SWIRL_START_ANGLE) * SWIRL_RADIUS };
-    const p1 = curve.Point{ .x = center.x + @cos(mid_angle) * SWIRL_BULGE, .y = center.y + @sin(mid_angle) * SWIRL_BULGE };
-    const p2 = curve.Point{ .x = center.x + @cos(end_angle) * SWIRL_RADIUS, .y = center.y + @sin(end_angle) * SWIRL_RADIUS };
+fn swirlCenterAngle(progress: f32) f32 {
+    return SWIRL_BASE_ANGLE + progress * SWIRL_TOTAL_ROTATION;
+}
+
+fn swirlCurvePoint(center: curve.Point, center_angle: f32, t: f32) curve.Point {
+    const a0 = center_angle - SWIRL_ARC_WIDTH / 2;
+    const a1 = center_angle + SWIRL_ARC_WIDTH / 2;
+    const p0 = curve.Point{ .x = center.x + @cos(a0) * SWIRL_RADIUS, .y = center.y + @sin(a0) * SWIRL_RADIUS };
+    const p1 = curve.Point{ .x = center.x + @cos(center_angle) * SWIRL_BULGE, .y = center.y + @sin(center_angle) * SWIRL_BULGE };
+    const p2 = curve.Point{ .x = center.x + @cos(a1) * SWIRL_RADIUS, .y = center.y + @sin(a1) * SWIRL_RADIUS };
     return curve.quadraticBezier(p0, p1, p2, t);
 }
 
@@ -132,14 +137,14 @@ pub fn draw(char: types.Character) void {
         const center = curve.Point{ .x = char.x + types.WIDTH / 2, .y = char.y + types.HEIGHT / 2 };
         const elapsed = types.SWING_FRAMES - char.swing_timer;
         const progress = @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(types.SWING_FRAMES));
+        const center_angle = swirlCenterAngle(progress);
         w4.DRAW_COLORS.* = 0x0002; // color1 = palette[1] (white) fill, color2 = transparent (no border)
-        // Redraws the whole swept-so-far curve every frame, each sample
-        // sized by its own t, so the trail keeps its "squash" belly shape.
+        // center_angle advances with progress -- redrawn fresh each frame,
+        // this reads as orbiting the player, not a fixed shape filling in.
         var i: u32 = 0;
         while (i <= SWIRL_SAMPLES) : (i += 1) {
             const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(SWIRL_SAMPLES));
-            if (t > progress) break;
-            const p = swirlCurvePoint(center, t);
+            const p = swirlCurvePoint(center, center_angle, t);
             const diam = swirlDiameter(t);
             const half = diam / 2;
             w4.Oval(@intFromFloat(p.x - half), @intFromFloat(p.y - half), @intFromFloat(diam), @intFromFloat(diam));
