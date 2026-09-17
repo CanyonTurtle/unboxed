@@ -144,11 +144,14 @@ pub fn update(self: *types.Character, gamepad: u8, prev_gamepad: u8) void {
             self.surface = null; // drove off the edge -- fall until something catches it
         }
     } else if (self.surface == null) {
-        // Airborne -- landing reattaches by which side it hit, and resyncs
-        // `clockwise` to momentum, not whichever way it faced before leaping.
+        // Airborne -- landing reattaches by which side it hit (hit_ceiling
+        // included: no gravity means a bonk that didn't reattach floats forever).
         if (result.on_ground) {
             self.surface = .floor;
             if (vel_x_before_collision != 0) self.clockwise = clockwiseFor(.floor, vel_x_before_collision);
+        } else if (result.hit_ceiling) {
+            self.surface = .ceiling;
+            if (vel_x_before_collision != 0) self.clockwise = clockwiseFor(.ceiling, vel_x_before_collision);
         } else if (result.hit_wall) {
             self.surface = if (vel_x_before_collision > 0) .right_wall else if (vel_x_before_collision < 0) .left_wall else null;
             if (self.surface) |landed| {
@@ -263,6 +266,20 @@ test "landing while drifting resyncs clockwise to match the actual drift directi
     while (i < 30 and c.surface == null) : (i += 1) update(&c, 0, 0);
     try testing.expectEqual(types.Surface.floor, c.surface.?);
     try testing.expect(c.clockwise); // drifting left = clockwise on the floor, regardless of the old value
+}
+
+test "floating straight up into a ceiling reattaches instead of hovering there forever" {
+    room_types.active = .{};
+    for (1..31) |tx| room_types.active.tiles[3][tx] = .wall; // a ceiling to bonk
+    var c = types.Character{ .x = 40, .y = 30, .surface = null, .vel_y = -1.2 };
+    var i: u32 = 0;
+    while (i < 30 and c.surface == null) : (i += 1) update(&c, 0, 0);
+    try testing.expectEqual(types.Surface.ceiling, c.surface.?);
+    // No gravity means no second chance to reattach next frame -- verify
+    // it's actually gripped (grip pulls it back into the tile it just left).
+    const y_after = c.y;
+    update(&c, 0, 0);
+    try testing.expectEqual(y_after, c.y);
 }
 
 test "landing back on a surface starts the squash timer" {

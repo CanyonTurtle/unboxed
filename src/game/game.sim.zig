@@ -31,7 +31,9 @@ pub fn newRun() void {
     map_sim.newRun();
     char_types.player = .{
         .x = 2 * room_types.TILE_SIZE,
-        .y = (@as(f32, @floatFromInt(room_types.GRID_H)) - 4) * room_types.TILE_SIZE,
+        // Flush with the floor, not overlapping it -- an embedded spawn
+        // reads as touching a wall too, misfiring a bogus corner-turn.
+        .y = @as(f32, @floatFromInt(room_types.FLOOR_ROW)) * room_types.TILE_SIZE - char_types.HEIGHT,
     };
 }
 
@@ -124,6 +126,17 @@ test "newRun resets hp/score/upgrades and starts a fresh room" {
     try testing.expectEqual(char_types.BASE_MAX_HP, char_types.player.max_hp);
     try testing.expectEqual(@as(u32, 0), char_types.player.score);
     try testing.expectEqual(@as(u32, 0), map_types.room_index);
+}
+
+test "newRun spawns flush with the floor, not overlapping it, and holding still never drifts" {
+    newRun();
+    const floor_y = @as(f32, @floatFromInt(room_types.FLOOR_ROW)) * room_types.TILE_SIZE;
+    try testing.expectEqual(floor_y - char_types.HEIGHT, char_types.player.y);
+
+    var i: u32 = 0;
+    while (i < 20) : (i += 1) update(0);
+    try testing.expectEqual(char_types.Surface.floor, char_types.player.surface.?);
+    try testing.expectEqual(floor_y - char_types.HEIGHT, char_types.player.y);
 }
 
 // Clears every pot/enemy/item/powerup/key, and the room's own generated
